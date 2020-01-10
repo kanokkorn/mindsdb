@@ -13,6 +13,8 @@ import csv
 import sys
 import traceback
 
+from mindsdb.libs.data_types.mindsdb_logger import log
+
 
 def fixFileIfPossible(filepath):
     """
@@ -39,7 +41,7 @@ def fixFileIfPossible(filepath):
                 length = int(len(row))
                 if length > max_len:
                     max_len = length
-                    print(max_len)
+                    log.info(max_len)
     except:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         error = traceback.format_exception(exc_type, exc_value,
@@ -56,11 +58,8 @@ def fixFileIfPossible(filepath):
 
     return fixed, error
 
-
-
-
 def test():
-    print(fixFileIfPossible('/Users/jorge/Downloads/tweets (1).csv'))
+    log.info(fixFileIfPossible('/Users/jorge/Downloads/tweets (1).csv'))
 
 # only run the test if this file is called from debugger
 if __name__ == "__main__":

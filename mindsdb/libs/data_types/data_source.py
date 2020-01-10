@@ -1,20 +1,29 @@
-
+from mindsdb.libs.data_types.mindsdb_logger import log
 
 class DataSource:
 
     def __init__(self, *args, **kwargs):
-        self._col_map = {} # you can store here if there were some columns renamed
-        self._setup(*args, **kwargs)
+        self.log = log
+        df, col_map = self._setup(*args, **kwargs)
+        self.setDF(df, col_map)
+        self._cleanup()
 
     def _setup(self, df):
-        self._df = df
+        col_map = {}
+        for col in df.columns:
+            col_map[col] = col
+        return df, col_map
+
+    def _cleanup(self):
+        pass
 
     @property
     def df(self):
         return self._df
 
-    def setDF(self, df):
+    def setDF(self, df, col_map):
         self._df = df
+        self._col_map = col_map
 
     def dropColumns(self, column_list):
         """
@@ -26,32 +35,6 @@ class DataSource:
 
         cols = [col if col not in self._col_map else self._col_map[col] for col in column_list]
         self._df = self._df.drop(columns=cols)
-
-    def applyFunctionToColumn(self, column, function):
-        """
-        This applies a function for all rows in a column
-
-        :param column: column to affect
-        :param function: a lambda or function to call
-        :return: None
-        """
-
-        # make sure that we use the column name in the data source
-        column = self.getColNameAsInDF(column)
-
-        self._df[column] = self._df[column].apply(lambda col: function(col))
-
-
-    def getColNameAsInDF(self, column):
-        """
-        Since Columns can be mapped at somepoint in the DF then you can use this to get the DF column name by passing the original value
-
-        :param column:
-        :return: None
-        """
-
-        return column if column not in self._col_map else self._col_map[column]
-
 
     def __getattr__(self, item):
         """

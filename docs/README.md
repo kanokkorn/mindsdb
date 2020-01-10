@@ -1,13 +1,8 @@
-[<Back to Table of Contents](../README.md)
-### Why use MindsDB?
+Documentation is currently hosted on the [mindsdb docs website](https://mindsdb.github.io/mindsdb), you can find all the `.md` file used to generate it [here](https://github.com/mindsdb/mindsdb/tree/master/docs/website/docs), tough note, some of the ones that don't appear on the official website yet might be unfinished or not up to date.
 
-Developers today are more aware of the capabilities of Machine Learning, however from ideas of using ML to actual implementations,  there are many hurdles and therefore most ideas of using Machine Learning never even start.
+Some relevant links:
 
-Thanks to MindsDB people building products can **focus more on**:
-
-* Understanding what problems/predictions are interesting for the business.
-* What data should be of interest for a given prediction.
-
-**Less on:**  spending countless hours building models, making data fit into such models, trainining, testing, validating, tunning hyperparameters, ....
-
-
+* [Installing MindsDB](https://mindsdb.github.io/mindsdb/docs/installing-mindsdb)
+* [Learning from Examples](https://mindsdb.github.io/mindsdb/docs/basic-mindsdb)
+* [Frequently Asked Questions](https://mindsdb.github.io/mindsdb/docs/faq)
+* [Provide Feedback to Improve MindsDB](https://mindsdb.typeform.com/to/c3CEtj)

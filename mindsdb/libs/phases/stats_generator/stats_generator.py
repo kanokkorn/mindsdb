@@ -1,147 +1,92 @@
-"""
-*******************************************************
- * Copyright (C) 2017 MindsDB Inc. <copyright@mindsdb.com>
- *
- * This file is part of MindsDB Server.
- *
- * MindsDB Server can not be copied and/or distributed without the express
- * permission of MindsDB Inc
- *******************************************************
-"""
-
 import random
-import json
 import time
 import warnings
+import imghdr
+import sndhdr
 import logging
-import traceback
-import sys
+from collections import Counter
+#import multiprocessing
 
 import numpy as np
-import pandas as pd
 import scipy.stats as st
-from dateutil.parser import parse as parseDate
+from dateutil.parser import parse as parse_datetime
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.cluster import MiniBatchKMeans
+import imagehash
+from PIL import Image
 
-import mindsdb.config as CONFIG
-
+from mindsdb.config import CONFIG
 from mindsdb.libs.constants.mindsdb import *
 from mindsdb.libs.phases.base_module import BaseModule
-from mindsdb.libs.helpers.text_helpers import splitRecursive
-from mindsdb.external_libs.stats import sampleSize
+from mindsdb.libs.helpers.text_helpers import splitRecursive, clean_float, cast_string_to_python_type
+from mindsdb.libs.helpers.debugging import *
+from mindsdb.external_libs.stats import calculate_sample_size
+from mindsdb.libs.phases.stats_generator.scores import *
 
-from mindsdb.libs.data_types.transaction_metadata import TransactionMetadata
 
 
 class StatsGenerator(BaseModule):
+    """
+    # The stats generator phase is responsible for generating the insights we need about the data in order to vectorize it
+    # Additionally, the stats generator also provides the user with some extra meaningful information about his data,
+    though this functionality may be moved to a different step (after vectorization) in the future
+    """
+    def _get_file_type(self, potential_path):
+        could_be_fp = False
+        for char in ('/', '\\', ':\\'):
+            if char in potential_path:
+                could_be_fp = True
 
-    phase_name = PHASE_DATA_STATS
+        if not could_be_fp:
+            return False
 
-    def cast(self, string):
-        """ Returns an integer, float or a string from a string"""
         try:
-            if string is None:
-                return None
-            return int(string)
-        except ValueError:
-            try:
-                return float(string)
-            except ValueError:
-                if string == '':
-                    return None
-                else:
-                    return string
+            is_img = imghdr.what(potential_path)
+            if is_img is not None:
+                return DATA_SUBTYPES.IMAGE
+        except:
+            # Not a file or file doesn't exist
+            return False
 
-    def isNumber(self, string):
+        # @TODO: CURRENTLY DOESN'T DIFFERENTIATE BETWEEN AUDIO AND VIDEO
+        is_audio = sndhdr.what(potential_path)
+        if is_audio is not None:
+            return DATA_SUBTYPES.AUDIO
+
+        return False
+
+    def _is_number(self, string):
         """ Returns True if string is a number. """
         try:
-            float(string)
-            return True
+            # Should crash if not number
+            clean_float(str(string))
+            if '.' in str(string) or ',' in str(string):
+                return DATA_SUBTYPES.FLOAT
+            else:
+                return DATA_SUBTYPES.INT
         except ValueError:
             return False
 
-    def isDate(self, string):
+    def _get_date_type(self, string):
         """ Returns True if string is a valid date format """
         try:
-            parseDate(string)
-            return True
-        except ValueError:
+            dt = parse_datetime(string)
+
+            # Not accurate 100% for a single datetime str, but should work in aggregate
+            if dt.hour == 0 and dt.minute == 0 and dt.second == 0 and len(string) <= 16:
+                return DATA_SUBTYPES.DATE
+            else:
+                return DATA_SUBTYPES.TIMESTAMP
+        except:
             return False
 
-    def getColumnDataType(self, data):
-        """ Returns the column datatype based on a random sample of 15 elements """
-        currentGuess = DATA_TYPES.NUMERIC
-        type_dist = {}
+    def _get_text_type(self, data):
+        """
+        Takes in column data and defines if its categorical or full_text
 
-        for element in data:
-            if self.isNumber(element):
-                currentGuess = DATA_TYPES.NUMERIC
-            elif self.isDate(element):
-                currentGuess = DATA_TYPES.DATE
-            else:
-                currentGuess = DATA_TYPES.TEXT
-
-            if currentGuess not in type_dist:
-                type_dist[currentGuess] = 1
-            else:
-                type_dist[currentGuess] += 1
-
-        curr_data_type = None
-        max_data_type = 0
-
-        for data_type in type_dist:
-            if type_dist[data_type] > max_data_type:
-                curr_data_type = data_type
-                max_data_type = type_dist[data_type]
-
-        if curr_data_type == DATA_TYPES.TEXT:
-            return self.getTextType(data)
-
-        return curr_data_type
-
-    def getBestFitDistribution(self, data, bins=40):
-        """Model data by finding best fit distribution to data"""
-        # Get histogram of original data
-
-        y, x = np.histogram(data, bins=bins, density=False)
-        x = (x + np.roll(x, -1))[:-1] / 2.0
-        # Distributions to check
-        DISTRIBUTIONS = [
-            st.bernoulli, st.beta,  st.cauchy, st.expon,  st.gamma, st.halfcauchy, st.lognorm,
-            st.norm, st.uniform, st.poisson
-        ]
-
-        # Best holders
-        best_distribution = st.norm
-        best_params = (0.0, 1.0)
-        best_sse = np.inf
-        # Estimate distribution parameters from data
-        for i, distribution in enumerate(DISTRIBUTIONS):
-            try:
-                # Ignore warnings from data that can't be fit
-                with warnings.catch_warnings():
-                    warnings.filterwarnings('ignore')
-                    # fit dist to data
-                    params = distribution.fit(data)
-                    # Separate parts of parameters
-                    arg = params[:-2]
-                    loc = params[-2]
-                    scale = params[-1]
-
-                    # Calculate fitted PDF and error with fit in distribution
-                    pdf = distribution.pdf(x, loc=loc, scale=scale, *arg)
-                    sse = np.sum(np.power(y - pdf, 2.0))
-                    # identify if this distribution is better
-                    if best_sse > sse > 0:
-                        best_distribution = distribution
-                        best_params = params
-                        best_sse = sse
-
-            except Exception:
-                pass
-
-        return (best_distribution.name, best_params, x.tolist(), y.tolist())
-
-    def getTextType(self, data):
+        :param data: a list of cells in a column
+        :return: DATA_TYPES.CATEGORICAL or DATA_TYPES.FULL_TEXT
+        """
 
         total_length = len(data)
         key_count = {}
@@ -157,7 +102,7 @@ class StatsGenerator(BaseModule):
             cell_wseparator = cell
             sep_tag = '{#SEP#}'
             for separator in WORD_SEPARATORS:
-                cell_wseparator = cell_wseparator.replace(separator,sep_tag)
+                cell_wseparator = str(cell_wseparator).replace(separator,sep_tag)
 
             words_split = cell_wseparator.split(sep_tag)
             words = len([ word for word in words_split if word not in ['', None] ])
@@ -165,158 +110,467 @@ class StatsGenerator(BaseModule):
             if max_number_of_words < words:
                 max_number_of_words += words
 
-        if max_number_of_words == 1:
-            return DATA_TYPES.TEXT
-        if max_number_of_words <= 3 and len(key_count) < total_length * 0.8:
-            return DATA_TYPES.TEXT
+        # If all sentences are less than or equal and 3 words, assume it's a category rather than a sentence
+        if max_number_of_words <= 3:
+            if len(key_count.keys()) < 3:
+                return DATA_TYPES.CATEGORICAL, DATA_SUBTYPES.SINGLE
+            else:
+                return DATA_TYPES.CATEGORICAL, DATA_SUBTYPES.MULTIPLE
         else:
-            return DATA_TYPES.FULL_TEXT
+            return DATA_TYPES.SEQUENTIAL, DATA_SUBTYPES.TEXT
 
 
+    def _get_column_data_type(self, data, data_frame, col_name):
+        """
+        Provided the column data, define if its numeric, data or class
 
-    # def isFullText(self, data):
-    #     """
-    #     It determines if the column is full text right
-    #     Right now we assume its full text if any cell contains any of the WORD_SEPARATORS
-    #
-    #     :param data: a list containing all the column
-    #     :return: Boolean
-    #     """
-    #     for cell in data:
-    #         try:
-    #             if any(separator in cell for separator in WORD_SEPARATORS):
-    #                 return True
-    #         except:
-    #             exc_type, exc_value, exc_traceback = sys.exc_info()
-    #             error = traceback.format_exception(exc_type, exc_value,
-    #                                       exc_traceback)
-    #             return False
-    #     return False
+        :param data: a list containing each of the cells in a column
+
+        :return: type and type distribution, we can later use type_distribution to determine data quality
+        NOTE: type distribution is the count that this column has for belonging cells to each DATA_TYPE
+        """
+
+        type_dist = {}
+        subtype_dist = {}
+        additional_info = {'other_potential_subtypes': [], 'other_potential_types': []}
+
+        # calculate type_dist
+        if len(data) < 1:
+            self.log.warning(f'Column {col_name} has no data in it. Please remove {col_name} from the training file or fill in some of the values !')
+            return None, None, None, None, None, 'Column empty'
+
+        for element in data:
+            # Maybe use list of functions in the future
+            element = element
+            current_subtype_guess = 'Unknown'
+            current_type_guess = 'Unknown'
+
+            # Check if Nr
+            if current_subtype_guess is 'Unknown' or current_type_guess is 'Unknown':
+                subtype = self._is_number(element)
+                if subtype is not False:
+                    current_type_guess = DATA_TYPES.NUMERIC
+                    current_subtype_guess = subtype
+
+            # Check if date
+            if current_subtype_guess is 'Unknown' or current_type_guess is 'Unknown':
+                subtype = self._get_date_type(element)
+                if subtype is not False:
+                    current_type_guess = DATA_TYPES.DATE
+                    current_subtype_guess = subtype
+
+            # Check if sequence
+            if current_subtype_guess is 'Unknown' or current_type_guess is 'Unknown':
+                for char in [',','\t','|',' ']:
+                    try:
+                        all_nr = True
+                        eles = element.rstrip(']').lstrip('[').split(char)
+                        for ele in eles:
+                            if not self._is_number(ele):
+                                all_nr = False
+                    except:
+                        all_nr = False
+                        pass
+                    if all_nr is True:
+                        additional_info['separator'] = char
+                        current_type_guess = DATA_TYPES.SEQUENTIAL
+                        current_subtype_guess = DATA_SUBTYPES.ARRAY
+                        break
+
+            # Check if file
+            if current_subtype_guess is 'Unknown' or current_type_guess is 'Unknown':
+                subtype = self._get_file_type(element)
+                if subtype is not False:
+                    current_type_guess = DATA_TYPES.FILE_PATH
+                    current_subtype_guess = subtype
+
+            # If nothing works, assume it's categorical or sequential and determine type later (based on all the data in the column)
+
+            if current_type_guess not in type_dist:
+                type_dist[current_type_guess] = 1
+            else:
+                type_dist[current_type_guess] += 1
+
+            if current_subtype_guess not in subtype_dist:
+                subtype_dist[current_subtype_guess] = 1
+            else:
+                subtype_dist[current_subtype_guess] += 1
 
 
+        curr_data_type = 'Unknown'
+        curr_data_subtype = 'Unknown'
+        max_data_type = 0
+
+        # assume that the type is the one with the most prevalent type_dist
+        for data_type in type_dist:
+            # If any of the members are Unknown, use that data type (later to be turned into CATEGORICAL or SEQUENTIAL), since otherwise the model will crash when casting
+            # @TODO consider removing rows where data type is unknown in the future, might just be corrupt data... a bit hard to imply currently
+            if data_type == 'Unknown':
+                curr_data_type = 'Unknown'
+                break
+            if type_dist[data_type] > max_data_type:
+                curr_data_type = data_type
+                max_data_type = type_dist[data_type]
+
+        # Set subtype
+        max_data_subtype = 0
+        if curr_data_type != 'Unknown':
+            for data_subtype in subtype_dist:
+                if subtype_dist[data_subtype] > max_data_subtype and data_subtype in DATA_TYPES_SUBTYPES.subtypes[curr_data_type]:
+                    curr_data_subtype = data_subtype
+                    max_data_subtype = subtype_dist[data_subtype]
+
+        # If it finds that the type is categorical it should determine if its categorical or actual text
+        if curr_data_type == 'Unknown':
+            curr_data_type, curr_data_subtype = self._get_text_type(data)
+            type_dist[curr_data_type] = type_dist.pop('Unknown')
+            subtype_dist[curr_data_subtype] = subtype_dist.pop('Unknown')
 
 
+        # @TODO: Extremely slow for large datasets, make it faster
+        if curr_data_type != DATA_TYPES.CATEGORICAL and curr_data_subtype != DATA_SUBTYPES.DATE:
+            all_values = data_frame[col_name]
+            all_distinct_vals = set(all_values)
 
-    def getWordsDictionary(self, data, full_text = False):
+            # The numbers here are picked randomly, the gist of it is that if values repeat themselves a lot we should consider the column to be categorical
+            nr_vals = len(all_values)
+            nr_distinct_vals = len(all_distinct_vals)
+
+            if ( nr_vals/20 > nr_distinct_vals and (curr_data_type not in [DATA_TYPES.NUMERIC, DATA_TYPES.DATE] or nr_distinct_vals < 20) ) or (curr_data_subtype == DATA_SUBTYPES.TEXT and self.transaction.lmd['handle_text_as_categorical']):
+                additional_info['other_potential_subtypes'].append(curr_data_type)
+                additional_info['other_potential_types'].append(curr_data_subtype)
+                curr_data_type = DATA_TYPES.CATEGORICAL
+                if len(all_distinct_vals) < 3:
+                    curr_data_subtype = DATA_SUBTYPES.SINGLE
+                else:
+                    curr_data_subtype = DATA_SUBTYPES.MULTIPLE
+                type_dist = {}
+                subtype_dist = {}
+
+                type_dist[curr_data_type] = len(data)
+                subtype_dist[curr_data_subtype] = len(data)
+
+        return curr_data_type, curr_data_subtype, type_dist, subtype_dist, additional_info, 'Column ok'
+
+    @staticmethod
+    def clean_int_and_date_data(col_data):
+        cleaned_data = []
+
+        for value in col_data:
+            if value != '' and value != '\r' and value != '\n':
+                cleaned_data.append(value)
+
+        cleaned_data = [clean_float(i) for i in cleaned_data if str(i) not in ['', str(None), str(False), str(np.nan), 'NaN', 'nan', 'NA', 'null']]
+        return cleaned_data
+
+    @staticmethod
+    def get_words_histogram(data, is_full_text=False):
         """ Returns an array of all the words that appear in the dataset and the number of times each word appears in the dataset """
 
         splitter = lambda w, t: [wi.split(t) for wi in w] if type(w) == type([]) else splitter(w,t)
 
-        if full_text:
+        if is_full_text:
             # get all words in every cell and then calculate histograms
             words = []
             for cell in data:
                 words += splitRecursive(cell, WORD_SEPARATORS)
 
             hist = {i: words.count(i) for i in words}
-            x = list(hist.keys())
-            histogram = {
-                'x': x,
-                'y': list(hist.values())
-            }
-            return x, histogram
-
-
         else:
             hist = {i: data.count(i) for i in data}
-            x = list(hist.keys())
-            histogram = {
-                'x': x,
-                'y': list(hist.values())
-            }
-            return x, histogram
 
-    def getParamsAsDictionary(self, params):
-        """ Returns a dictionary with the params of the distribution """
-        arg = params[:-2]
-        loc = params[-2]
-        scale = params[-1]
-        ret = {
-            'loc': loc,
-            'scale': scale,
-            'shape': arg
+        return {
+            'x': list(hist.keys()),
+            'y': list(hist.values())
         }
-        return ret
+
+    @staticmethod
+    def get_histogram(data, data_type=None, data_subtype=None, full_text=None, hmd=None):
+        """ Returns a histogram for the data and [optionaly] the percentage buckets"""
+        if data_type == DATA_TYPES.SEQUENTIAL:
+            is_full_text = True if data_subtype == DATA_SUBTYPES.TEXT else False
+            return StatsGenerator.get_words_histogram(data, is_full_text), None
+        elif data_type == DATA_TYPES.NUMERIC or data_subtype == DATA_SUBTYPES.TIMESTAMP:
+            data = StatsGenerator.clean_int_and_date_data(data)
+            y, x = np.histogram(data, bins=50, range=(min(data),max(data)), density=False)
+            x = x[:-1]
+            #x = (x + np.roll(x, -1))[:-1] / 2.0 <--- original code, was causing weird bucket values when we had outliers
+            x = x.tolist()
+            y = y.tolist()
+            return {
+                'x': x
+                ,'y': y
+            }, None
+        elif data_type == DATA_TYPES.CATEGORICAL or data_subtype == DATA_SUBTYPES.DATE :
+            histogram = Counter(data)
+            return {
+                'x': list(histogram.keys()),
+                'y': list(histogram.values())
+            }, None
+        elif data_subtype == DATA_SUBTYPES.IMAGE:
+            image_hashes = []
+            for img_path in data:
+                img_hash = imagehash.phash(Image.open(img_path))
+                seq_hash = []
+                for hash_row in img_hash.hash:
+                    seq_hash.extend(hash_row)
+
+                image_hashes.append(np.array(seq_hash))
+
+            kmeans = MiniBatchKMeans(n_clusters=20, batch_size=round(len(image_hashes)/4))
+
+            kmeans.fit(image_hashes)
+
+            if hmd is not None:
+                hmd['bucketing_algorithms'][col_name] = kmeans
+
+            x = []
+            y = [0] * len(kmeans.cluster_centers_)
+
+            for cluster in kmeans.cluster_centers_:
+                similarities = cosine_similarity(image_hashes,kmeans.cluster_centers_)
+
+                similarities = list(map(lambda x: sum(x), similarities))
+
+                index_of_most_similar = similarities.index(max(similarities))
+                x.append(data.iloc[index_of_most_similar])
+
+            indices = kmeans.predict(image_hashes)
+            for index in indices:
+                y[index] +=1
+
+            return {
+                'x': x,
+                'y': y
+            }, kmeans.cluster_centers_
+        else:
+            return None, None
+
+    @staticmethod
+    def is_foreign_key(column_name, column_stats, data):
+        foregin_key_type = DATA_SUBTYPES.INT in column_stats['other_potential_subtypes'] or DATA_SUBTYPES.INT == column_stats['data_subtype']
+
+        data_looks_like_id = True
+
+        # No need to run this check if the type already indicates a foreign key like value
+        if not foregin_key_type:
+            val_length = None
+            for val in data:
+                is_uuid = True
+                is_same_length = False
+
+                for char in str(val):
+                    if char not in ['0', '1','2','3','4','5','6','7','8','9','a','b','c','d','e','f','-']:
+                        is_uuid = False
+
+                if val_length is not False:
+                    if val_length is None:
+                        val_length = len(str(val))
+                    if len(str(val)) == val_length:
+                        is_same_length = True
+
+                if not is_uuid and not is_same_length:
+                    data_looks_like_id = False
+                    break
+
+        foreign_key_name = False
+        for endings in ['-id', '_id', 'ID', 'Id']:
+            if column_name.endswith(endings):
+                foreign_key_name = True
+        for keyword in ['account', 'uuid', 'identifier', 'user']:
+            if keyword in column_name:
+                foreign_key_name = True
+
+        return foreign_key_name and (foregin_key_type or data_looks_like_id)
 
 
+    def _log_interesting_stats(self, stats):
+        """
+        # Provide interesting insights about the data to the user and send them to the logging server in order for it to generate charts
 
-    def run(self):
+        :param stats: The stats extracted up until this point for all columns
+        """
+        for col_name in stats:
+            col_stats = stats[col_name]
+            # Overall quality
+            if col_stats['quality_score'] < 6:
+                # Some scores are not that useful on their own, so we should only warn users about them if overall quality is bad.
+                self.log.warning('Column "{}" is considered of low quality, the scores that influenced this decision will be listed below')
+                if 'duplicates_score' in col_stats and col_stats['duplicates_score'] < 6:
+                    duplicates_percentage = col_stats['duplicates_percentage']
+                    w = f'{duplicates_percentage}% of the values in column {col_name} seem to be repeated, this might indicate that your data is of poor quality.'
+                    self.log.warning(w)
+                    col_stats['duplicates_score_warning'] = w
+                else:
+                    col_stats['duplicates_score_warning'] = None
+            else:
+                col_stats['duplicates_score_warning'] = None
 
-        self.train_meta_data = TransactionMetadata()
-        self.train_meta_data.setFromDict(self.transaction.persistent_model_metadata.train_metadata)
+            #Compound scores
+            if col_stats['consistency_score'] < 3:
+                w = f'The values in column {col_name} rate poorly in terms of consistency. This means that the data has too many empty values, values with a hard to determine type and duplicate values. Please see the detailed logs below for more info'
+                self.log.warning(w)
+                col_stats['consistency_score_warning'] = w
+            else:
+                col_stats['consistency_score_warning'] = None
 
-        header = self.transaction.input_data.columns
-        origData = {}
+            if col_stats['redundancy_score'] < 5:
+                w = f'The data in the column {col_name} is likely somewhat redundant, any insight it can give us can already by deduced from your other columns. Please see the detailed logs below for more info'
+                self.log.warning(w)
+                col_stats['redundancy_score_warning'] = w
+            else:
+                col_stats['redundancy_score_warning'] = None
 
-        for column in header:
-            origData[column] = []
+            if col_stats['variability_score'] < 6:
+                w = f'The data in the column {col_name} seems to contain too much noise/randomness based on the value variability. That is to say, the data is too unevenly distributed and has too many outliers. Please see the detailed logs below for more info.'
+                self.log.warning(w)
+                col_stats['variability_score_warning'] = w
+            else:
+                col_stats['variability_score_warning'] = None
 
-        empty_count = {}
-        column_count = {}
+            # Some scores are meaningful on their own, and the user should be warnned if they fall below a certain threshold
+            if col_stats['empty_cells_score'] < 8:
+                empty_cells_percentage = col_stats['empty_percentage']
+                w = f'{empty_cells_percentage}% of the values in column {col_name} are empty, this might indicate that your data is of poor quality.'
+                self.log.warning(w)
+                col_stats['empty_cells_score_warning'] = w
+            else:
+                col_stats['empty_cells_score_warning'] = None
+
+            if col_stats['data_type_distribution_score'] < 7:
+                percentage_of_data_not_of_principal_type = col_stats['data_type_distribution_score'] * 100
+                principal_data_type = col_stats['data_type']
+                w = f'{percentage_of_data_not_of_principal_type}% of your data is not of type {principal_data_type}, which was detected to be the data type for column {col_name}, this might indicate that your data is of poor quality.'
+                self.log.warning(w)
+                col_stats['data_type_distribution_score_warning'] = w
+            else:
+                col_stats['data_type_distribution_score_warning'] = None
+
+            if 'z_test_based_outlier_score' in col_stats and col_stats['z_test_based_outlier_score'] < 6:
+                percentage_of_outliers = col_stats['z_test_based_outlier_score']*100
+                w = f"""Column {col_name} has a very high amount of outliers, {percentage_of_outliers}% of your data is more than 3 standard deviations away from the mean, this means that there might
+                be too much randomness in this column for us to make an accurate prediction based on it."""
+                self.log.warning(w)
+                col_stats['z_test_based_outlier_score_warning'] = w
+            else:
+                col_stats['z_test_based_outlier_score_warning'] = None
+
+            if 'lof_based_outlier_score' in col_stats and col_stats['lof_based_outlier_score'] < 4:
+                percentage_of_outliers = col_stats['percentage_of_log_based_outliers']
+                w = f"""Column {col_name} has a very high amount of outliers, {percentage_of_outliers}% of your data doesn't fit closely in any cluster using the KNN algorithm (20n) to cluster your data, this means that there might
+                be too much randomness in this column for us to make an accurate prediction based on it."""
+                self.log.warning(w)
+                col_stats['lof_based_outlier_score_warning'] = w
+            else:
+                col_stats['lof_based_outlier_score_warning'] = None
+
+            if col_stats['value_distribution_score'] < 3:
+                max_probability_key = col_stats['max_probability_key']
+                w = f"""Column {col_name} is very biased towards the value {max_probability_key}, please make sure that the data in this column is correct !"""
+                self.log.warning(w)
+                col_stats['value_distribution_score_warning'] = w
+            else:
+                col_stats['value_distribution_score_warning'] = None
+
+            if col_stats['similarity_score'] < 6:
+                similar_percentage = col_stats['max_similarity'] * 100
+                similar_col_name = col_stats['most_similar_column_name']
+                w = f'Column {col_name} and {similar_col_name} are {similar_percentage}% the same, please make sure these represent two distinct features of your data !'
+                self.log.warning(w)
+                col_stats['similarity_score_warning'] = w
+            else:
+                col_stats['similarity_score_warning'] = None
+
+            '''
+            if col_stats['correlation_score'] < 5:
+                not_quite_correlation_percentage = col_stats['correlation_score'] * 100
+                most_correlated_column = col_stats['most_correlated_column']
+                self.log.warning(f"""Using a statistical predictor we\'v discovered a correlation of roughly {not_quite_correlation_percentage}% between column
+                {col_name} and column {most_correlated_column}""")
+            '''
+
+            # We might want to inform the user about a few stats regarding his column regardless of the score, this is done below
+            self.log.info('Data distribution for column "{}"'.format(col_name))
+            try:
+                self.log.infoChart(stats[col_name]['data_subtype_dist'], type='list', uid='Data Type Distribution for column "{}"'.format(col_name))
+            except:
+                # Functionality is specific to mindsdb logger
+                pass
+
+    def run(self, input_data, modify_light_metadata, hmd=None, print_logs=True):
+        """
+        # Runs the stats generation phase
+        # This shouldn't alter the columns themselves, but rather provide the `stats` metadata object and update the types for each column
+        # A lot of information about the data distribution and quality will  also be logged to the server in this phase
+        """
+
+        ''' @TODO Uncomment when we need multiprocessing, possibly disable on OSX
+        no_processes = multiprocessing.cpu_count() - 2
+        if no_processes < 1:
+            no_processes = 1
+        pool = multiprocessing.Pool(processes=no_processes)
+        '''
+        if print_logs == False:
+            self.log = logging.getLogger('null-logger')
+            self.log.propagate = False
 
         # we dont need to generate statistic over all of the data, so we subsample, based on our accepted margin of error
-        population_size = len(self.transaction.input_data.data_array)
-        sample_size = int(sampleSize(population_size=population_size, margin_error=CONFIG.DEFAULT_MARGIN_OF_ERROR, confidence_level=CONFIG.DEFAULT_CONFIDENCE_LEVEL))
+        population_size = len(input_data.data_frame)
+
+        if population_size < 50:
+            sample_size = population_size
+        else:
+            sample_size = int(calculate_sample_size(population_size=population_size, margin_error=self.transaction.lmd['sample_margin_of_error'], confidence_level=self.transaction.lmd['sample_confidence_level']))
+            #if sample_size > 3000 and sample_size > population_size/8:
+            #    sample_size = min(round(population_size/8),3000)
 
         # get the indexes of randomly selected rows given the population size
         input_data_sample_indexes = random.sample(range(population_size), sample_size)
-        self.logging.info('population_size={population_size},  sample_size={sample_size}  {percent:.2f}%'.format(population_size=population_size, sample_size=sample_size, percent=(sample_size/population_size)*100))
+        self.log.info('population_size={population_size},  sample_size={sample_size}  {percent:.2f}%'.format(population_size=population_size, sample_size=sample_size, percent=(sample_size/population_size)*100))
 
-        for sample_i in input_data_sample_indexes:
-            row = self.transaction.input_data.data_array[sample_i]
-            for i, val in enumerate(row):
-                column = header[i]
-                value = self.cast(val)
-                if not column in empty_count:
-                    empty_count[column] = 0
-                    column_count[column] = 0
-                if value == None:
-                    empty_count[column] += 1
-                else:
-                    origData[column].append(value)
-                column_count[column] += 1
+        all_sampled_data = input_data.data_frame.iloc[input_data_sample_indexes]
+
         stats = {}
+        col_data_dict = {}
 
-        for i, col_name in enumerate(origData):
-            col_data = origData[col_name] # all rows in just one column
-            data_type = self.getColumnDataType(col_data)
+        for col_name in all_sampled_data.columns.values:
+            if col_name in self.transaction.lmd['columns_to_ignore']:
+                continue
 
-            # NOTE: Enable this if you want to assume that some numeric values can be text
-            # We noticed that by default this should not be the behavior
-            # TODO: Evaluate if we want to specify the problem type on predict statement as regression or classification
-            #
-            # if col_name in self.train_meta_data.model_predict_columns and data_type == DATA_TYPES.NUMERIC:
-            #     unique_count = len(set(col_data))
-            #     if unique_count <= CONFIG.ASSUME_NUMERIC_AS_TEXT_WHEN_UNIQUES_IS_LESS_THAN:
-            #         data_type = DATA_TYPES.TEXT
+            col_data = all_sampled_data[col_name].dropna()
+            full_col_data = all_sampled_data[col_name]
 
-            if data_type == DATA_TYPES.DATE:
-                for i, element in enumerate(col_data):
-                    if str(element) in [str(''), str(None), str(False), str(np.nan), 'NaN', 'nan', 'NA']:
-                        col_data[i] = None
+            data_type, curr_data_subtype, data_type_dist, data_subtype_dist, additional_info, column_status = self._get_column_data_type(col_data, input_data.data_frame, col_name)
+
+
+            if column_status == 'Column empty':
+                if modify_light_metadata:
+                    self.transaction.lmd['columns_to_ignore'].append(col_name)
+
+                continue
+
+            new_col_data = []
+
+            if curr_data_subtype == DATA_SUBTYPES.TIMESTAMP: #data_type == DATA_TYPES.DATE:
+                for element in col_data:
+                    if str(element) in [str(''), str(None), str(False), str(np.nan), 'NaN', 'nan', 'NA', 'null']:
+                        new_col_data.append(None)
                     else:
                         try:
-                            col_data[i] = int(parseDate(element).timestamp())
+                            new_col_data.append(int(parse_datetime(element).timestamp()))
                         except:
-                            logging.warning('Could not convert string to date and it was expected, current value {value}'.format(value=element))
-                            col_data[i] = None
+                            self.log.warning(f'Could not convert string from col "{col_name}" to date and it was expected, instead got: {element}')
+                            new_col_data.append(None)
+                col_data = new_col_data
+            if data_type == DATA_TYPES.NUMERIC or curr_data_subtype == DATA_SUBTYPES.TIMESTAMP:
+                histogram, _ = StatsGenerator.get_histogram(col_data, data_type=data_type, data_subtype=curr_data_subtype)
+                x = histogram['x']
+                y = histogram['y']
 
-            if data_type == DATA_TYPES.NUMERIC or data_type == DATA_TYPES.DATE:
-                newData = []
-
-                for value in col_data:
-                    if value != '' and value != '\r' and value != '\n':
-                        newData.append(value)
-
-
-                col_data = [float(i) for i in newData if str(i) not in ['', str(None), str(False), str(np.nan), 'NaN', 'nan', 'NA']]
-
-                y, x = np.histogram(col_data, 50, density=False)
-                x = (x + np.roll(x, -1))[:-1] / 2.0
-                x = x.tolist()
-                y = y.tolist()
-
-                xp = []
+                col_data = StatsGenerator.clean_int_and_date_data(col_data)
+                # This means the column is all nulls, which we don't handle at the moment
+                if len(col_data) < 1:
+                    return None
 
                 if len(col_data) > 0:
                     max_value = max(col_data)
@@ -326,38 +580,6 @@ class StatsGenerator(BaseModule):
                     var = np.var(col_data)
                     skew = st.skew(col_data)
                     kurtosis = st.kurtosis(col_data)
-
-                    inc_rate = 0.05
-                    initial_step_size = abs(max_value-min_value)/100
-
-                    xp += [min_value]
-                    i = min_value + initial_step_size
-
-                    while i < max_value:
-
-                        xp += [i]
-                        i_inc = abs(i-min_value)*inc_rate
-                        i = i + i_inc
-
-
-                    # TODO: Solve inc_rate for N
-                    #    min*inx_rate + (min+min*inc_rate)*inc_rate + (min+(min+min*inc_rate)*inc_rate)*inc_rate ....
-                    #
-                    #      x_0 = 0
-                    #      x_i = (min+x_(i-1)) * inc_rate = min*inc_rate + x_(i-1)*inc_rate
-                    #
-                    #      sum of x_i_{i=1}^n (x_i) = max_value = inc_rate ( n * min + sum(x_(i-1)) )
-                    #
-                    #      mx_value/inc_rate = n*min + inc_rate ( n * min + sum(x_(i-2)) )
-                    #
-                    #     mx_value = n*min*in_rate + inc_rate^2*n*min + inc_rate^2*sum(x_(i-2))
-                    #              = n*min(inc_rate+inc_rate^2) + inc_rate^2*sum(x_(i-2))
-                    #              = n*min(inc_rate+inc_rate^2) + inc_rate^2*(inc_rate ( n * min + sum(x_(i-3)) ))
-                    #              = n*min(sum_(i=1)^(i=n)(inc_rate^i))
-                    #    =>  sum_(i=1)^(i=n)(inc_rate^i)) = max_value/(n*min(sum_(i=1)^(i=n))
-                    #
-                    # # i + i*x
-
                 else:
                     max_value = 0
                     min_value = 0
@@ -366,24 +588,17 @@ class StatsGenerator(BaseModule):
                     var = 0
                     skew = 0
                     kurtosis = 0
-                    xp = []
-
 
                 is_float = True if max([1 if int(i) != i else 0 for i in col_data]) == 1 else False
 
-
                 col_stats = {
-                    "column": col_name,
-                    KEYS.DATA_TYPE: data_type,
-                    # "distribution": best_fit_name,
-                    # "distributionParams": distribution_params,
+                    'data_type': data_type,
+                    'data_subtype': curr_data_subtype,
                     "mean": mean,
                     "median": median,
                     "variance": var,
                     "skewness": skew,
                     "kurtosis": kurtosis,
-                    "emptyColumns": empty_count[col_name],
-                    "emptyPercentage": empty_count[col_name] / column_count[col_name] * 100,
                     "max": max_value,
                     "min": min_value,
                     "is_float": is_float,
@@ -391,15 +606,34 @@ class StatsGenerator(BaseModule):
                         "x": x,
                         "y": y
                     },
-                    "percentage_buckets": xp
+                    "percentage_buckets": histogram['x']#xp
                 }
-                stats[col_name] = col_stats
-            # else if its text
-            else:
 
+            elif data_type == DATA_TYPES.CATEGORICAL or curr_data_subtype == DATA_SUBTYPES.DATE:
+                histogram, _ = StatsGenerator.get_histogram(input_data.data_frame[col_name], data_type=data_type, data_subtype=curr_data_subtype)
+
+                col_stats = {
+                    'data_type': data_type,
+                    'data_subtype': curr_data_subtype,
+                    "histogram": histogram,
+                    "percentage_buckets": histogram['x']
+                }
+
+            elif curr_data_subtype == DATA_SUBTYPES.IMAGE:
+                histogram, percentage_buckets = StatsGenerator.get_histogram(col_data, data_subtype=curr_data_subtype)
+
+                col_stats = {
+                    'data_type': data_type,
+                    'data_subtype': curr_data_subtype,
+                    'percentage_buckets': percentage_buckets,
+                    'histogram': histogram
+                }
+
+            # @TODO This is probably wrong, look into it a bit later
+            else:
                 # see if its a sentence or a word
-                is_full_text = True if data_type == DATA_TYPES.FULL_TEXT else False
-                dictionary, histogram = self.getWordsDictionary(col_data, is_full_text)
+                histogram, _ = StatsGenerator.get_histogram(col_data, data_type=data_type, data_subtype=curr_data_subtype)
+                dictionary = list(histogram.keys())
 
                 # if no words, then no dictionary
                 if len(col_data) == 0:
@@ -411,48 +645,82 @@ class StatsGenerator(BaseModule):
                     dictionary_lenght_percentage = len(
                         dictionary) / len(col_data) * 100
                     # if the number of uniques is too large then treat is a text
+                    is_full_text = True if curr_data_subtype == DATA_SUBTYPES.TEXT else False
                     if dictionary_lenght_percentage > 10 and len(col_data) > 50 and is_full_text==False:
                         dictionary = []
                         dictionary_available = False
-                col_stats = {
 
-                    "column": col_name,
-                    KEYS.DATA_TYPE: DATA_TYPES.FULL_TEXT if is_full_text else data_type,
+                col_stats = {
+                    'data_type': data_type,
+                    'data_subtype': curr_data_subtype,
                     "dictionary": dictionary,
                     "dictionaryAvailable": dictionary_available,
                     "dictionaryLenghtPercentage": dictionary_lenght_percentage,
-                    "emptyColumns": empty_count[col_name],
-                    "emptyPercentage": empty_count[col_name] / column_count[col_name] * 100,
                     "histogram": histogram
                 }
-                stats[col_name] = col_stats
+            stats[col_name] = col_stats
+            stats[col_name]['data_type_dist'] = data_type_dist
+            stats[col_name]['data_subtype_dist'] = data_subtype_dist
+            stats[col_name]['column'] = col_name
 
+            empty_count = len(full_col_data) - len(col_data)
 
+            stats[col_name]['empty_cells'] = empty_count
+            stats[col_name]['empty_percentage'] = empty_count * 100 / len(full_col_data)
+            for k in additional_info:
+                stats[col_name][k] = additional_info[k]
 
-        total_rows = len(self.transaction.input_data.data_array)
-        test_rows = len(self.transaction.input_data.test_indexes)
-        validation_rows = len(self.transaction.input_data.validation_indexes)
-        train_rows = len(self.transaction.input_data.train_indexes)
+            col_data_dict[col_name] = col_data
 
-        self.transaction.persistent_model_metadata.column_stats = stats
-        self.transaction.persistent_model_metadata.total_row_count = total_rows
-        self.transaction.persistent_model_metadata.test_row_count = test_rows
-        self.transaction.persistent_model_metadata.train_row_count = train_rows
-        self.transaction.persistent_model_metadata.validation_row_count = validation_rows
+        for col_name in all_sampled_data.columns:
+            if col_name in self.transaction.lmd['columns_to_ignore']:
+                continue
 
-        self.transaction.persistent_model_metadata.update()
+            # Use the multiprocessing pool for computing scores which take a very long time to compute
+            # For now there's only one and computing it takes way too long, so this is not enabled
+            scores = []
 
+            '''
+            scores.append(pool.apply_async(compute_clf_based_correlation_score, args=(stats, all_sampled_data, col_name)))
+            '''
+            for score_promise in scores:
+                # Wait for function on process to finish running
+                score = score_promise.get()
+                stats[col_name].update(score)
+
+            for score_func in [compute_duplicates_score, compute_empty_cells_score, compute_data_type_dist_score, compute_z_score, compute_lof_score, compute_similariy_score, compute_value_distribution_score]:
+                start_time = time.time()
+                if 'compute_z_score' in str(score_func) or 'compute_lof_score' in str(score_func):
+                    stats[col_name].update(score_func(stats, col_data_dict, col_name))
+                else:
+                    stats[col_name].update(score_func(stats, all_sampled_data, col_name))
+
+                fun_name = str(score_func)
+                run_duration = round(time.time() - start_time, 2)
+
+            stats[col_name].update(compute_consistency_score(stats, col_name))
+            stats[col_name].update(compute_redundancy_score(stats, col_name))
+            stats[col_name].update(compute_variability_score(stats, col_name))
+            stats[col_name].update(compute_data_quality_score(stats, col_name))
+
+            stats[col_name]['is_foreign_key'] = self.is_foreign_key(col_name, stats[col_name], col_data_dict[col_name])
+            if stats[col_name]['is_foreign_key'] and self.transaction.lmd['handle_foreign_keys']:
+                self.transaction.lmd['columns_to_ignore'].append(col_name)
+
+        total_rows = len(input_data.data_frame)
+
+        if modify_light_metadata:
+            self.transaction.lmd['column_stats'] = stats
+
+            self.transaction.lmd['data_preparation']['accepted_margin_of_error'] = self.transaction.lmd['sample_margin_of_error']
+
+            self.transaction.lmd['data_preparation']['total_row_count'] = total_rows
+            self.transaction.lmd['data_preparation']['used_row_count'] = sample_size
+
+        ''' @TODO Uncomment when we need multiprocessing, possibly disable on OSX
+        pool.close()
+        pool.join()
+        '''
+
+        self._log_interesting_stats(stats)
         return stats
-
-
-
-def test():
-    from mindsdb.libs.controllers.mindsdb_controller import MindsDBController as MindsDB
-
-    mdb = MindsDB()
-    mdb.learn(from_query='select * from position_tgt', predict='position', model_name='mdsb_model', test_query=None, breakpoint = PHASE_DATA_STATS)
-
-# only run the test if this file is called from debugger
-if __name__ == "__main__":
-    test()
-

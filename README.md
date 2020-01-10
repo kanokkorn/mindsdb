@@ -1,73 +1,118 @@
 
-![MindsDB](https://raw.githubusercontent.com/mindsdb/mindsdb/master/mindsdb/proxies/web/static/img/logo1gw.png "MindsDB")
-    v.0.8.9
+![MindsDB](https://raw.githubusercontent.com/mindsdb/mindsdb/master/assets/logo_gh.png "MindsDB")
 #
 
+[![Build Status](https://img.shields.io/travis/mindsdb/mindsdb?branch=master&logo=travis)](https://travis-ci.org/mindsdb/mindsdb)
+![](https://img.shields.io/badge/python-3.6%20|%203.7-brightgreen.svg)
+[![PyPI version](https://badge.fury.io/py/MindsDB.svg)](https://badge.fury.io/py/MindsDB)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/mindsdb)
+![Website](https://img.shields.io/website?url=https%3A%2F%2Fwww.mindsdb.com%2F)
+
+MindsDB is an Explainable AutoML framework for developers.[![Tweet](https://img.shields.io/twitter/url/http/shields.io.svg?style=social)](https://twitter.com/intent/tweet?text=Machine%20Learning%20in%20one%20line%20of%20code%21&url=https://www.mindsdb.com&via=mindsdb&hashtags=ai,ml,machine_learning,neural_networks)
+
+
+# MindsDB Native
+
+With MindsDB you can build, train and use state of the art ML models in as simple as one line of code.
+  
+* [Installing MindsDB Native](https://mindsdb.github.io/mindsdb/docs/installing-mindsdb)
+* [Learning from Examples](https://mindsdb.github.io/mindsdb/docs/basic-mindsdb)
+* [MindsDB Explainability GUI](http://mindsdb.com/product) 
+* [Frequently Asked Questions](https://mindsdb.github.io/mindsdb/docs/faq)
+* [Provide Feedback to Improve MindsDB](https://mindsdb.typeform.com/to/c3CEtj)
+
+
+## Try it out
+
+### Installation
 
 
 
-MindsDB's goal is to make it very simple for developers to use the power of artificial neural networks in their projects. 
-
-
-* [Installing MindsDB](docs/Installing.md)
-* [Using MindsDB in the cloud with Google Colab](docs/GoogleColab.md)
-* [Config Settings](docs/Config.md)
-* [Learning from Examples](docs/examples/basic/README.md)
-* [Inside MindsDB](docs/InsideMindsDB.md)
-* [Provide feedback to improve MindsDB](https://mindsdb.typeform.com/to/c3CEtj)
-
-
-## Quick Overview
-
-You can get started in your own computer/cloud or you can also try it via your browser using [Google Colab](docs/GoogleColab.md).
-
-It's very simple to setup 
+* **Desktop**: You can use MindsDB on your own computer in under a minute, if you already have a python environment setup, just run the following command, otherwise simply follow the [installation instructions Complete Manual](https://mindsdb.github.io/mindsdb/docs/installing-mindsdb).
 
 ```bash
  pip3 install mindsdb --user
 ```
 
-[(Having issues? learn more)](docs/Installing.md)
+* **Docker**: If you would like to run it all in a container simply:  
 
-Once you have MindsDB installed, you can use it as follows [(learn more)](docs/examples/basic/README.md):
+```bash
+sh -c "$(curl -sSL https://raw.githubusercontent.com/mindsdb/mindsdb/master/distributions/docker/build-docker.sh)"
+```
 
 
-To **train a model**:
+### Usage
 
+Once you have MindsDB installed, you can use it as follows:
 
+Import **MindsDB**:
 
 ```python
 
-from mindsdb import *
+from mindsdb import Predictor
 
+```
 
-# We tell mindsDB what we want to learn and from what data
-MindsDB().learn(
-    from_data="home_rentals.csv", # the path to the file where we can learn from, (note: can be url)
-    predict='rental_price', # the column we want to learn to predict given all the data in the file
-    model_name='home_rentals' # the name of this model
+One line of code to **train a model**:
+
+```python
+# tell mindsDB what we want to learn and from what data
+Predictor(name='home_rentals_price').learn(
+    to_predict='rental_price', # the column we want to learn to predict given all the data in the file
+    from_data="https://s3.eu-west-2.amazonaws.com/mindsdb-example-data/home_rentals.csv" # the path to the file where we can learn from, (note: can be url)
 )
 
 ```
 
 
-To **use the model**:
-
+One line of code to **use the model**:
 
 ```python
 
-from mindsdb import *
-
 # use the model to make predictions
-result = MindsDB().predict(predict='rental_price', when={'number_of_rooms': 2,'number_of_bathrooms':1, 'sqft': 1190}, model_name='home_rentals')
+result = Predictor(name='home_rentals_price').predict(when={'number_of_rooms': 2,'number_of_bathrooms':1, 'sqft': 1190})
 
 # you can now print the results
-print('The predicted price is ${price} with {conf} confidence'.format(price=result.predicted_values[0]['rental_price'], conf=result.predicted_values[0]['prediction_confidence']))
+print('The predicted price is ${price} with {conf} confidence'.format(price=result[0]['rental_price'], conf=result[0]['rental_price_confidence']))
 
 ```
 
+Visit the documentation to [learn more](https://mindsdb.github.io/mindsdb/docs/basic-mindsdb)
+
+* **Google Colab**: You can also try MindsDB straight here [![Google Colab](https://colab.research.google.com/assets/colab-badge.svg "MindsDB")](https://colab.research.google.com/drive/1qsIkMeAQFE-MOEANd1c6KMyT44OnycSb)
+ 
+
+## Video Tutorial
+
+Please click on the image below to load the tutorial:
+
+[![here](https://img.youtube.com/vi/a49CvkoOdfY/0.jpg)](https://youtu.be/yr7fgqt9cfU)  
+
+(Note: Please manually set it to 720p or greater to have the text appear clearly)
+
+## MindsDB Graphical User Interface
+
+You can also work with mindsdb via its graphical user interface ([download here](http://mindsdb.com/product)).
+Please click on the image below to load the tutorial:
+
+[![here](https://img.youtube.com/vi/fOwdv4j26CA/0.jpg)](https://youtu.be/fOwdv4j26CA)  
+
+
+## MindsDB Lightwood: Machine Learning Lego Blocks
+
+Under the hood of mindsdb there is lightwood, a Pytorch based framework that breaks down machine learning problems into smaller blocks that can be glued together seamlessly. More info about [MindsDB lightwood's on GITHUB](https://github.com/mindsdb/lightwood/).
+
+## Contributing
+
+In order to make changes to mindsdb, the ideal approach is to fork the repository than clone the fork locally `PYTHONPATH`.
+
+For example: `export PYTHONPATH=$PYTHONPATH:/home/my_username/mindsdb`.
+
+To test if your changes are working you can try running the CI tests locally: `cd tests/ci_tests && python3 full_test.py`
+
+Once you have specific changes you want to merge into master, feel free to make a PR.
+
 ## Report Issues
 
-Please help us by reporting any issues you may have while using MindsDB.
+Please help us by [reporting any issues](https://github.com/mindsdb/mindsdb/issues/new/choose) you may have while using MindsDB.
 
-https://github.com/mindsdb/mindsdb/blob/master/.github/ISSUE_TEMPLATE/bug_report.md
