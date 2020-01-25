@@ -170,14 +170,22 @@ class ProbabilisticValidator():
         labels= list(set(self._original_real_buckets_buff))
 
         matrix = confusion_matrix(self._original_real_buckets_buff, self._original_predicted_buckets_buff, labels=labels)
+
+        value_labels = []
+        for label in labels:
+            try:
+                value_labels.append(str(self.buckets[label]))
+            except:
+                value_labels.append('UNKNOWN')
+
         confusion_matrix_obj = {
             'matrix': [[int(y) for y in x] for x in matrix],
-            'predicted': [str(self.buckets[x]) for x in labels],
-            'real': [str(self.buckets[x]) for x in labels]
+            'predicted': value_labels,
+            'real': value_labels
         }
         return confusion_matrix_obj
 
-    def evaluate_prediction_accuracy(self, features_existence, predicted_value, always_use_model_prediction):
+    def evaluate_prediction_accuracy(self, features_existence, predicted_value):
         """
         # Fit the probabilistic validator on an observation
         :param features_existence: A vector of 0 and 1 representing the existence of all the features (0 == not exists, 1 == exists)
@@ -219,7 +227,7 @@ class ProbabilisticValidator():
             pass
 
 
-        return ProbabilityEvaluation(self.buckets, distribution, predicted_value, always_use_model_prediction)
+        return ProbabilityEvaluation(self.buckets, distribution, predicted_value)
 
 
 

@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 from dateutil.parser import parse as parse_datetime
 
 from mindsdb.libs.constants.mindsdb import *
@@ -18,7 +19,7 @@ class LightwoodBackend():
     def _get_group_by_key(self, group_by, row):
         gb_lookup_key = '!!@@!!'
         for column in group_by:
-            gb_lookup_key += column + '_' + row[column] + '!!@@!!'
+            gb_lookup_key += f'{column}_{row[column]}_!!@@!!'
         return gb_lookup_key
 
     def _create_timeseries_df(self, original_df):
@@ -109,11 +110,11 @@ class LightwoodBackend():
                 lightwood_data_type = 'image'
                 other_keys['encoder_attrs']['aim'] = 'balance'
 
+            elif data_subtype in (DATA_SUBTYPES.AUDIO):
+                lightwood_data_type = 'audio'
+
             elif data_subtype in (DATA_SUBTYPES.TEXT):
-                if col_name in self.transaction.lmd['force_categorical_encoding']:
-                    lightwood_data_type = 'categorical'
-                else:
-                    lightwood_data_type = 'text'
+                lightwood_data_type = 'text'
 
             elif data_subtype in (DATA_SUBTYPES.ARRAY):
                 lightwood_data_type = 'time_series'
@@ -186,7 +187,7 @@ class LightwoodBackend():
             if eval_every_x_epochs < 3:
                 eval_every_x_epochs = 3
 
-
+            logging.getLogger().setLevel(logging.DEBUG)
             if self.transaction.lmd['stop_training_in_x_seconds'] is None:
                 self.predictor.learn(from_data=train_df, test_data=test_df, callback_on_iter=self.callback_on_iter, eval_every_x_epochs=eval_every_x_epochs)
             else:
@@ -230,5 +231,7 @@ class LightwoodBackend():
         formated_predictions = {}
         for k in predictions:
             formated_predictions[k] = predictions[k]['predictions']
+            if 'confidences' in predictions[k]:
+                formated_predictions[f'{k}_confidences'] = predictions[k]['confidences']
 
         return formated_predictions

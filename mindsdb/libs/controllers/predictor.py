@@ -42,23 +42,8 @@ class Predictor:
             except:
                 self.log.warning('Could not check for updates !')
 
-        # set the mindsdb storage folder
-        storage_ok = True  # default state
-
-        # if it does not exist try to create it
-        if not os.path.exists(CONFIG.MINDSDB_STORAGE_PATH):
-            try:
-                self.log.info('{folder} does not exist, creating it now'.format(folder=CONFIG.MINDSDB_STORAGE_PATH))
-                path = Path(CONFIG.MINDSDB_STORAGE_PATH)
-                path.mkdir(exist_ok=True, parents=True)
-            except:
-                self.log.info(traceback.format_exc())
-                storage_ok = False
-                self.log.error('MindsDB storage foldler: {folder} does not exist and could not be created'.format(
-                    folder=CONFIG.MINDSDB_STORAGE_PATH))
-
         # If storage path is not writable, raise an exception as this can no longer be
-        if not os.access(CONFIG.MINDSDB_STORAGE_PATH, os.W_OK) or storage_ok == False:
+        if not os.access(CONFIG.MINDSDB_STORAGE_PATH, os.W_OK):
             error_message = '''Cannot write into storage path, please either set the config variable mindsdb.config.set('MINDSDB_STORAGE_PATH',<path>) or give write access to {folder}'''
             raise ValueError(error_message.format(folder=CONFIG.MINDSDB_STORAGE_PATH))
 
@@ -212,7 +197,10 @@ class Predictor:
 
         return icm
 
-    def get_model_data(self, model_name, lmd=None):
+    def get_model_data(self, model_name=None, lmd=None):
+        if model_name is None:
+            model_name = self.name
+
         if lmd is None:
             with open(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, f'{model_name}_light_model_metadata.pickle'), 'rb') as fp:
                 lmd = pickle.load(fp)
@@ -362,7 +350,7 @@ class Predictor:
         except:
             return False
 
-    def export_model(self, model_name):
+    def export_model(self, model_name=None):
         """
         If you want to export a model to a file
 
@@ -498,7 +486,7 @@ class Predictor:
         return True
 
 
-    def delete_model(self, model_name):
+    def delete_model(self, model_name=None):
         """
         If you want to export a model to a file
 
@@ -519,6 +507,7 @@ class Predictor:
         """
         Analyse the particular dataset being given
         """
+
         from_ds = getDS(from_data)
         transaction_type = TRANSACTION_ANALYSE
         sample_confidence_level = 1 - sample_margin_of_error
@@ -540,6 +529,11 @@ class Predictor:
         light_transaction_metadata['columns_to_ignore'] = []
         light_transaction_metadata['data_preparation'] = {}
         light_transaction_metadata['predict_columns'] = []
+        light_transaction_metadata['empty_columns'] = []
+
+        light_transaction_metadata['handle_foreign_keys'] = True
+        light_transaction_metadata['force_categorical_encoding'] = []
+        light_transaction_metadata['handle_text_as_categorical'] = False
 
         Transaction(session=self, light_transaction_metadata=light_transaction_metadata, heavy_transaction_metadata=heavy_transaction_metadata, logger=self.log)
         return self.get_model_data(model_name=None, lmd=light_transaction_metadata)
@@ -639,6 +633,8 @@ class Predictor:
         light_transaction_metadata['ludwig_data'] = {}
         light_transaction_metadata['weight_map'] = {}
         light_transaction_metadata['confusion_matrices'] = {}
+        light_transaction_metadata['empty_columns'] = []
+
         light_transaction_metadata['equal_accuracy_for_all_output_categories'] = equal_accuracy_for_all_output_categories
         light_transaction_metadata['output_categories_importance_dictionary'] = output_categories_importance_dictionary if output_categories_importance_dictionary is not None else {}
 
@@ -651,11 +647,6 @@ class Predictor:
             light_transaction_metadata['skip_stats_generation'] = unstable_parameters_dict['skip_stats_generation']
         else:
             light_transaction_metadata['skip_stats_generation'] = False
-
-        if 'always_use_model_prediction' in unstable_parameters_dict:
-            light_transaction_metadata['always_use_model_prediction'] = unstable_parameters_dict['always_use_model_prediction']
-        else:
-            light_transaction_metadata['always_use_model_prediction'] = False
 
         if 'optimize_model' in unstable_parameters_dict:
             light_transaction_metadata['optimize_model'] = unstable_parameters_dict['optimize_model']
@@ -748,11 +739,6 @@ class Predictor:
         light_transaction_metadata['use_gpu'] = use_gpu
         light_transaction_metadata['data_preparation'] = {}
         light_transaction_metadata['run_confidence_variation_analysis'] = run_confidence_variation_analysis
-
-        if 'always_use_model_prediction' in unstable_parameters_dict:
-            light_transaction_metadata['always_use_model_prediction'] = unstable_parameters_dict['always_use_model_prediction']
-        else:
-            light_transaction_metadata['always_use_model_prediction'] = False
 
         if 'force_disable_cache' in unstable_parameters_dict:
             light_transaction_metadata['force_disable_cache'] = unstable_parameters_dict['force_disable_cache']
