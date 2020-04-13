@@ -12,14 +12,13 @@
 from mindsdb.libs.constants.mindsdb import *
 import json
 import hashlib
-from dateutil.parser import parse as parse_datetime
 import numpy
 
 def clean_float(val):
     if type(val) in [type(int(1)), type(1.0)] :
         return float(val)
 
-    if isinstance(val, numpy.float64) or isinstance(val, float) or isinstance(val, int):
+    if isinstance(val, (float, int, numpy.float64)):
         return val
 
     val = str(val)

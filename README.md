@@ -1,38 +1,70 @@
+<h1 align="center">
+	<img width="300" src="https://github.com/mindsdb/mindsdb/blob/master/assets/MindsDBColorPurp@3x.png?raw=true" alt="MindsDB"> 
+	<br>
+	
+</h1>
 
-![MindsDB](https://raw.githubusercontent.com/mindsdb/mindsdb/master/assets/logo_gh.png "MindsDB")
-#
-
-[![Build Status](https://img.shields.io/travis/mindsdb/mindsdb?branch=master&logo=travis)](https://travis-ci.org/mindsdb/mindsdb)
-![](https://img.shields.io/badge/python-3.6%20|%203.7-brightgreen.svg)
-[![PyPI version](https://badge.fury.io/py/MindsDB.svg)](https://badge.fury.io/py/MindsDB)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/mindsdb)
-![Website](https://img.shields.io/website?url=https%3A%2F%2Fwww.mindsdb.com%2F)
-
-MindsDB is an Explainable AutoML framework for developers.[![Tweet](https://img.shields.io/twitter/url/http/shields.io.svg?style=social)](https://twitter.com/intent/tweet?text=Machine%20Learning%20in%20one%20line%20of%20code%21&url=https://www.mindsdb.com&via=mindsdb&hashtags=ai,ml,machine_learning,neural_networks)
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.6%20|%203.7|%203.8-brightgreen.svg" alt="Python supported"></a>
+   <a href="https://pypi.org/project/MindsDB/"><img src="https://badge.fury.io/py/MindsDB.svg" alt="PyPi Version"></a>
+  <a href="https://pypi.org/project/MindsDB/"><img src="https://img.shields.io/pypi/dm/mindsdb" alt="PyPi Downloads"></a>
+  <a href="https://community.mindsdb.com/"><img src="https://img.shields.io/discourse/posts?server=https%3A%2F%2Fcommunity.mindsdb.com%2F" alt="MindsDB Community"></a>
+  <a href="https://www.mindsdb.com/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fwww.mindsdb.com%2F" alt="MindsDB Website"></a>
+</p>
 
 
-# MindsDB Native
 
-With MindsDB you can build, train and use state of the art ML models in as simple as one line of code.
-  
-* [Installing MindsDB Native](https://mindsdb.github.io/mindsdb/docs/installing-mindsdb)
-* [Learning from Examples](https://mindsdb.github.io/mindsdb/docs/basic-mindsdb)
-* [MindsDB Explainability GUI](http://mindsdb.com/product) 
-* [Frequently Asked Questions](https://mindsdb.github.io/mindsdb/docs/faq)
-* [Provide Feedback to Improve MindsDB](https://mindsdb.typeform.com/to/c3CEtj)
+
+
+MindsDB is an Explainable AutoML framework for developers built on top of Pytorch. It enables you to build, train and test state of the art ML models in as simple as one line of code. [![Tweet](https://img.shields.io/twitter/url/http/shields.io.svg?style=social)](https://twitter.com/intent/tweet?text=Machine%20Learning%20in%20one%20line%20of%20code%21&url=https://www.mindsdb.com&via=mindsdb&hashtags=ai,ml,machine_learning,neural_networks)
+
+<table border="0" style=" border: 0px solid white;">
+	<tbody border="0" style="border:0px">
+<tr border="0" style="border:0px">
+	<td border="0" style="border:0px">
+		<img width="600" src="https://github.com/mindsdb/mindsdb/blob/master/assets/Terminal .png?raw=true" alt="MindsDB">
+	</td>
+	<td border="0" style="border:0px">
+		<img alt="Linux build" src="https://www.screenconnect.com/Images/LogoLinux.png" align="center" height="30" width="30" />  <a href="https://travis-ci.com/mindsdb/mindsdb">
+		<img src="https://badges.herokuapp.com/travis/mindsdb/mindsdb?branch=master&label=build&env=BADGE=linux"/>
+		</a><hr/>
+		<img alt="Windows build" src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/76/Windows_logo_-_2012_%28dark_blue%2C_lines_thinner%29.svg/414px-Windows_logo_-_2012_%28dark_blue%2C_lines_thinner%29.svg.png" align="center" height="30" width="30" /> <a href="https://travis-ci.com/mindsdb/mindsdb">
+		<img src="https://badges.herokuapp.com/travis/mindsdb/mindsdb?branch=master&label=build&env=BADGE=windows"/>
+		</a><hr/>
+		<img alt="macOS build" src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Apple_logo_black.svg/245px-Apple_logo_black.svg.png"  align="center" height="30" width="30" /> <a href="https://travis-ci.com/mindsdb/mindsdb">
+		<img src="https://badges.herokuapp.com/travis/mindsdb/mindsdb?branch=master&label=build&env=BADGE=osx"/>
+		</a>
+	</td>	
+</tr>
+	</tbody>
+</table>
+
+
 
 
 ## Try it out
 
+* [Installing MindsDB](https://mindsdb.github.io/mindsdb/docs/installing-mindsdb)
+* [Learning from Examples](https://mindsdb.github.io/mindsdb/docs/basic-mindsdb)
+* [MindsDB Explainability GUI](http://mindsdb.com/product)
+* [Frequently Asked Questions](https://mindsdb.github.io/mindsdb/docs/faq)
+* [Provide Feedback to Improve MindsDB](https://mindsdb.typeform.com/to/c3CEtj)
+
+
+
+
 ### Installation
 
 
-
-* **Desktop**: You can use MindsDB on your own computer in under a minute, if you already have a python environment setup, just run the following command, otherwise simply follow the [installation instructions Complete Manual](https://mindsdb.github.io/mindsdb/docs/installing-mindsdb).
+* **Desktop**: You can use MindsDB on your own computer in under a minute, if you already have a python environment setup, just run the following command:
 
 ```bash
- pip3 install mindsdb --user
+ pip install mindsdb --user
 ```
+
+>Note: Python 64 bit version is required. Depending on your environment, you might have to use `pip3` instead of `pip` in the above command.*
+
+  If for some reason this fail, don't worry, simply follow the [complete installation instructions](https://mindsdb.github.io/mindsdb/docs/installing-mindsdb) which will lead you through a more thorough procedure which should fix most issues.
 
 * **Docker**: If you would like to run it all in a container simply:  
 
@@ -80,7 +112,7 @@ print('The predicted price is ${price} with {conf} confidence'.format(price=resu
 Visit the documentation to [learn more](https://mindsdb.github.io/mindsdb/docs/basic-mindsdb)
 
 * **Google Colab**: You can also try MindsDB straight here [![Google Colab](https://colab.research.google.com/assets/colab-badge.svg "MindsDB")](https://colab.research.google.com/drive/1qsIkMeAQFE-MOEANd1c6KMyT44OnycSb)
- 
+
 
 ## Video Tutorial
 
@@ -116,3 +148,6 @@ Once you have specific changes you want to merge into master, feel free to make 
 
 Please help us by [reporting any issues](https://github.com/mindsdb/mindsdb/issues/new/choose) you may have while using MindsDB.
 
+## License
+
+* [MindsDB License](https://github.com/mindsdb/mindsdb/blob/master/LICENSE)

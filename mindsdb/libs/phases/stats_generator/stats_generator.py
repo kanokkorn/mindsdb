@@ -24,7 +24,6 @@ from mindsdb.external_libs.stats import calculate_sample_size
 from mindsdb.libs.phases.stats_generator.scores import *
 
 
-
 class StatsGenerator(BaseModule):
     """
     # The stats generator phase is responsible for generating the insights we need about the data in order to vectorize it
@@ -42,7 +41,9 @@ class StatsGenerator(BaseModule):
 
         try:
             is_img = imghdr.what(potential_path)
-            if is_img is not None:
+            if is_img is None:
+                return False
+            else:
                 return DATA_SUBTYPES.IMAGE
         except:
             # Not a file or file doesn't exist
@@ -141,26 +142,26 @@ class StatsGenerator(BaseModule):
 
         for element in data:
             # Maybe use list of functions in the future
-            element = element
+            element = str(element)
             current_subtype_guess = 'Unknown'
             current_type_guess = 'Unknown'
 
             # Check if Nr
-            if current_subtype_guess is 'Unknown' or current_type_guess is 'Unknown':
+            if current_subtype_guess == 'Unknown' or current_type_guess == 'Unknown':
                 subtype = self._is_number(element)
                 if subtype is not False:
                     current_type_guess = DATA_TYPES.NUMERIC
                     current_subtype_guess = subtype
 
             # Check if date
-            if current_subtype_guess is 'Unknown' or current_type_guess is 'Unknown':
+            if current_subtype_guess == 'Unknown' or current_type_guess == 'Unknown':
                 subtype = self._get_date_type(element)
                 if subtype is not False:
                     current_type_guess = DATA_TYPES.DATE
                     current_subtype_guess = subtype
 
             # Check if sequence
-            if current_subtype_guess is 'Unknown' or current_type_guess is 'Unknown':
+            if current_subtype_guess == 'Unknown' or current_type_guess == 'Unknown':
                 for char in [',','\t','|',' ']:
                     try:
                         all_nr = True
@@ -178,13 +179,11 @@ class StatsGenerator(BaseModule):
                         break
 
             # Check if file
-            if current_subtype_guess is 'Unknown' or current_type_guess is 'Unknown':
+            if current_subtype_guess == 'Unknown' or current_type_guess == 'Unknown':
                 subtype = self._get_file_type(element)
                 if subtype is not False:
                     current_type_guess = DATA_TYPES.FILE_PATH
                     current_subtype_guess = subtype
-
-            # If nothing works, assume it's categorical or sequential and determine type later (based on all the data in the column)
 
             if current_type_guess not in type_dist:
                 type_dist[current_type_guess] = 1
@@ -204,13 +203,28 @@ class StatsGenerator(BaseModule):
         # assume that the type is the one with the most prevalent type_dist
         for data_type in type_dist:
             # If any of the members are Unknown, use that data type (later to be turned into CATEGORICAL or SEQUENTIAL), since otherwise the model will crash when casting
-            # @TODO consider removing rows where data type is unknown in the future, might just be corrupt data... a bit hard to imply currently
+            # @TODO consider removing or flagging rows where data type is unknown in the future, might just be corrupt data... a bit hard to imply currently
             if data_type == 'Unknown':
                 curr_data_type = 'Unknown'
                 break
             if type_dist[data_type] > max_data_type:
                 curr_data_type = data_type
                 max_data_type = type_dist[data_type]
+
+        # If a mix of dates and numbers interpret all as dates
+        if DATA_TYPES.DATE in type_dist and len(set(type_dist.keys()) - set([DATA_TYPES.NUMERIC])) == 1:
+            type_dist[DATA_TYPES.DATE] += type_dist[DATA_TYPES.NUMERIC]
+            del type_dist[DATA_TYPES.NUMERIC]
+
+            if DATA_SUBTYPES.FLOAT in subtype_dist:
+                subtype_dist[DATA_SUBTYPES.TIMESTAMP] += subtype_dist[DATA_SUBTYPES.FLOAT]
+                del subtype_dist[DATA_SUBTYPES.FLOAT]
+
+            if DATA_SUBTYPES.INT in subtype_dist:
+                subtype_dist[DATA_SUBTYPES.TIMESTAMP] += subtype_dist[DATA_SUBTYPES.INT]
+                del subtype_dist[DATA_SUBTYPES.INT]
+
+            curr_data_type = DATA_TYPES.DATE
 
         # Set subtype
         max_data_subtype = 0
@@ -226,8 +240,6 @@ class StatsGenerator(BaseModule):
             type_dist[curr_data_type] = type_dist.pop('Unknown')
             subtype_dist[curr_data_subtype] = subtype_dist.pop('Unknown')
 
-
-        # @TODO: Extremely slow for large datasets, make it faster
         if curr_data_type != DATA_TYPES.CATEGORICAL and curr_data_subtype != DATA_SUBTYPES.DATE:
             all_values = data_frame[col_name]
             all_distinct_vals = set(all_values)
@@ -266,8 +278,16 @@ class StatsGenerator(BaseModule):
             if value != '' and value != '\r' and value != '\n':
                 cleaned_data.append(value)
 
-        cleaned_data = [clean_float(i) for i in cleaned_data if str(i) not in ['', str(None), str(False), str(np.nan), 'NaN', 'nan', 'NA', 'null']]
-        return cleaned_data
+        cleaned_data_new = []
+
+        for ele in cleaned_data:
+            if str(ele) not in ['', str(None), str(False), str(np.nan), 'NaN', 'nan', 'NA', 'null']:
+                try:
+                    cleaned_data_new.append(clean_float(ele))
+                except:
+                    cleaned_data_new.append(parse_datetime(str(ele)).timestamp())
+
+        return cleaned_data_new
 
     @staticmethod
     def get_words_histogram(data, is_full_text=False):
@@ -399,7 +419,7 @@ class StatsGenerator(BaseModule):
         for col_name in stats:
             col_stats = stats[col_name]
             # Overall quality
-            if col_stats['quality_score'] < 6:
+            if 'quality_score' in col_stats and col_stats['quality_score'] < 6:
                 # Some scores are not that useful on their own, so we should only warn users about them if overall quality is bad.
                 self.log.warning('Column "{}" is considered of low quality, the scores that influenced this decision will be listed below')
                 if 'duplicates_score' in col_stats and col_stats['duplicates_score'] < 6:
@@ -413,21 +433,21 @@ class StatsGenerator(BaseModule):
                 col_stats['duplicates_score_warning'] = None
 
             #Compound scores
-            if col_stats['consistency_score'] < 3:
+            if 'consistency_score' in col_stats and  col_stats['consistency_score'] < 3:
                 w = f'The values in column {col_name} rate poorly in terms of consistency. This means that the data has too many empty values, values with a hard to determine type and duplicate values. Please see the detailed logs below for more info'
                 self.log.warning(w)
                 col_stats['consistency_score_warning'] = w
             else:
                 col_stats['consistency_score_warning'] = None
 
-            if col_stats['redundancy_score'] < 5:
+            if 'redundancy_score' in col_stats and  col_stats['redundancy_score'] < 5:
                 w = f'The data in the column {col_name} is likely somewhat redundant, any insight it can give us can already by deduced from your other columns. Please see the detailed logs below for more info'
                 self.log.warning(w)
                 col_stats['redundancy_score_warning'] = w
             else:
                 col_stats['redundancy_score_warning'] = None
 
-            if col_stats['variability_score'] < 6:
+            if 'variability_score' in col_stats and  col_stats['variability_score'] < 6:
                 w = f'The data in the column {col_name} seems to contain too much noise/randomness based on the value variability. That is to say, the data is too unevenly distributed and has too many outliers. Please see the detailed logs below for more info.'
                 self.log.warning(w)
                 col_stats['variability_score_warning'] = w
@@ -470,7 +490,7 @@ class StatsGenerator(BaseModule):
             else:
                 col_stats['lof_based_outlier_score_warning'] = None
 
-            if col_stats['value_distribution_score'] < 3:
+            if 'value_distribution_score' in col_stats and col_stats['value_distribution_score'] < 3:
                 max_probability_key = col_stats['max_probability_key']
                 w = f"""Column {col_name} is very biased towards the value {max_probability_key}, please make sure that the data in this column is correct !"""
                 self.log.warning(w)
@@ -478,7 +498,7 @@ class StatsGenerator(BaseModule):
             else:
                 col_stats['value_distribution_score_warning'] = None
 
-            if col_stats['similarity_score'] < 6:
+            if 'similarity_score' in col_stats and col_stats['similarity_score'] < 6:
                 similar_percentage = col_stats['max_similarity'] * 100
                 similar_col_name = col_stats['most_similar_column_name']
                 w = f'Column {col_name} and {similar_col_name} are {similar_percentage}% the same, please make sure these represent two distinct features of your data !'
@@ -547,7 +567,6 @@ class StatsGenerator(BaseModule):
             full_col_data = all_sampled_data[col_name]
 
             data_type, curr_data_subtype, data_type_dist, data_subtype_dist, additional_info, column_status = self._get_column_data_type(col_data, input_data.data_frame, col_name)
-
 
             if column_status == 'Column empty':
                 if modify_light_metadata:
@@ -636,6 +655,14 @@ class StatsGenerator(BaseModule):
                     'histogram': histogram
                 }
 
+            elif curr_data_subtype == DATA_SUBTYPES.ARRAY:
+                col_stats = {
+                    'data_type': data_type,
+                    'data_subtype': curr_data_subtype,
+                    'percentage_buckets': None,
+                    'histogram': None
+                }
+
             # @TODO This is probably wrong, look into it a bit later
             else:
                 # see if its a sentence or a word
@@ -697,18 +724,23 @@ class StatsGenerator(BaseModule):
 
             for score_func in [compute_duplicates_score, compute_empty_cells_score, compute_data_type_dist_score, compute_z_score, compute_lof_score, compute_similariy_score, compute_value_distribution_score]:
                 start_time = time.time()
-                if 'compute_z_score' in str(score_func) or 'compute_lof_score' in str(score_func):
-                    stats[col_name].update(score_func(stats, col_data_dict, col_name))
-                else:
-                    stats[col_name].update(score_func(stats, all_sampled_data, col_name))
+
+                try:
+                    if 'compute_z_score' in str(score_func) or 'compute_lof_score' in str(score_func):
+                        stats[col_name].update(score_func(stats, col_data_dict, col_name))
+                    else:
+                        stats[col_name].update(score_func(stats, all_sampled_data, col_name))
+                except Exception as e:
+                    self.log.warning(e)
 
                 fun_name = str(score_func)
                 run_duration = round(time.time() - start_time, 2)
 
-            stats[col_name].update(compute_consistency_score(stats, col_name))
-            stats[col_name].update(compute_redundancy_score(stats, col_name))
-            stats[col_name].update(compute_variability_score(stats, col_name))
-            stats[col_name].update(compute_data_quality_score(stats, col_name))
+            for score_func in [compute_consistency_score, compute_redundancy_score, compute_variability_score, compute_data_quality_score]:
+                try:
+                    stats[col_name].update(score_func(stats, col_name))
+                except Exception as e:
+                    self.log.warning(e)
 
             stats[col_name]['is_foreign_key'] = self.is_foreign_key(col_name, stats[col_name], col_data_dict[col_name])
             if stats[col_name]['is_foreign_key'] and self.transaction.lmd['handle_foreign_keys']:

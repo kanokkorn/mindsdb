@@ -3,16 +3,16 @@ from mindsdb.libs.constants.mindsdb import *
 from mindsdb.libs.phases.base_module import BaseModule
 from mindsdb.libs.data_types.mindsdb_logger import log
 
-from mindsdb.libs.constants.mindsdb import *
 
 class DataSplitter(BaseModule):
-    def run(self):
+    def run(self):    
         group_by = self.transaction.lmd['model_group_by']
         if group_by is None or len(group_by) == 0:
             group_by = []
-            for col in self.transaction.lmd['predict_columns']:
-                if self.transaction.lmd['column_stats'][col]['data_type'] == DATA_TYPES.CATEGORICAL:
-                    group_by.append(col)
+            # @TODO: Group by seems not to work on certain datasets and the values get split complete unevenly between train/test/validation
+            #for col in self.transaction.lmd['predict_columns']:
+            #    if self.transaction.lmd['column_stats'][col]['data_type'] == DATA_TYPES.CATEGORICAL:
+            #        group_by.append(col)
             if len(group_by) > 0:
                 try:
                     self.transaction.input_data.data_frame = self.transaction.input_data.data_frame.sort_values(group_by)

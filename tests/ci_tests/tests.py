@@ -35,7 +35,6 @@ def test_force_vectors(amd, to_predict):
 
 def test_adapted_model_data(amd, to_predict):
     amd = amd
-    # @TODO: Sometimes are None, not sure why: [, validation_set_accuracy, accuracy]
     for k in ['status', 'name', 'version', 'data_source', 'current_phase', 'updated_at', 'created_at',
               'train_end_at']:
         assert (type(amd[k]) == str)
@@ -102,6 +101,8 @@ def basic_test(backend='lightwood',use_gpu=True,ignore_columns=[], run_extra=Fal
 
     print('\n\n========================\n\n')
     print(prediction[0].explain())
+    print(prediction[0].explanation)
+    print(prediction[0].raw_predictions())
     print('\n\n')
 
     # See if we can get the adapted model data

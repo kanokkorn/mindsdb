@@ -52,7 +52,7 @@ class Transaction:
 
         self.run()
 
-    # @TODO Make it more generic, move to general helpers, use inside predictor instead of linline loading
+
     def load_metadata(self):
         try:
             import resource
@@ -76,7 +76,7 @@ class Transaction:
         except:
             self.log.error(f'Could not load mindsdb heavy metadata in the file: {fn}')
 
-    # @TODO Make it more generic, move to general helpers
+
     def save_metadata(self):
         fn = os.path.join(CONFIG.MINDSDB_STORAGE_PATH, self.lmd['name'] + '_light_model_metadata.pickle')
         self.lmd['updated_at'] = str(datetime.datetime.now())
@@ -128,8 +128,7 @@ class Transaction:
             if clean_exit:
                 sys.exit(1)
             else:
-                raise ValueError(error)
-                return None
+                raise Exception(error)
         finally:
             self.lmd['is_active'] = False
 
@@ -156,7 +155,7 @@ class Transaction:
             self.lmd['current_phase'] = MODEL_STATUS_PREPARING
             self.save_metadata()
 
-            self._call_phase_module(clean_exit=True, module_name='DataExtractor')
+            self._call_phase_module(clean_exit=False, module_name='DataExtractor')
             self.save_metadata()
 
             self.lmd['current_phase'] = MODEL_STATUS_DATA_ANALYSIS
@@ -164,19 +163,19 @@ class Transaction:
                 self.load_metadata()
             else:
                 self.save_metadata()
-                self._call_phase_module(clean_exit=True, module_name='StatsGenerator', input_data=self.input_data, modify_light_metadata=True, hmd=self.hmd)
+                self._call_phase_module(clean_exit=False, module_name='StatsGenerator', input_data=self.input_data, modify_light_metadata=True, hmd=self.hmd)
                 self.save_metadata()
 
-            self._call_phase_module(clean_exit=True, module_name='DataSplitter')
+            self._call_phase_module(clean_exit=False, module_name='DataSplitter')
 
-            self._call_phase_module(clean_exit=True, module_name='DataTransformer', input_data=self.input_data)
+            self._call_phase_module(clean_exit=False, module_name='DataTransformer', input_data=self.input_data)
             self.lmd['current_phase'] = MODEL_STATUS_TRAINING
             self.save_metadata()
-            self._call_phase_module(clean_exit=True, module_name='ModelInterface', mode='train')
+            self._call_phase_module(clean_exit=False, module_name='ModelInterface', mode='train')
 
             self.lmd['current_phase'] = MODEL_STATUS_ANALYZING
             self.save_metadata()
-            self._call_phase_module(clean_exit=True, module_name='ModelAnalyzer')
+            self._call_phase_module(clean_exit=False, module_name='ModelAnalyzer')
 
             self.lmd['current_phase'] = MODEL_STATUS_TRAINED
             self.save_metadata()
@@ -239,7 +238,6 @@ class Transaction:
                     nulled_out_columns.append(column)
 
             nulled_out_data = pd.DataFrame(nulled_out_data)
-            nulled_out_predictions = []
 
         for mode in ['predict', 'analyze_confidence']:
             if mode == 'analyze_confidence':
@@ -260,8 +258,9 @@ class Transaction:
 
             for predicted_col in self.lmd['predict_columns']:
                 output_data[predicted_col] = list(self.hmd['predictions'][predicted_col])
-                if f'{predicted_col}_confidences' in self.hmd['predictions']:
-                    output_data[f'{predicted_col}_model_confidence'] = self.hmd['predictions'][f'{predicted_col}_confidences']
+                for extra_column in [f'{predicted_col}_model_confidence', f'{predicted_col}_confidence_range']:
+                    if extra_column in self.hmd['predictions']:
+                        output_data[extra_column] = self.hmd['predictions'][extra_column]
 
                 probabilistic_validator = unpickle_obj(self.hmd['probabilistic_validators'][predicted_col])
                 confidence_column_name = f'{predicted_col}_confidence'
@@ -282,42 +281,31 @@ class Transaction:
                     output_data[confidence_column_name][row_number] = prediction_evaluation.most_likely_probability
                     evaluations[predicted_col][row_number] = prediction_evaluation
 
-
-                if f'{predicted_col}_model_confidence' in output_data:
-                    # Scale model confidence between the confidences of the probabilsitic validator
-                    mc_arr = np.array(output_data[f'{predicted_col}_model_confidence'])
-
-                    normalized_model_confidences = ( (mc_arr - np.min(mc_arr)) / (np.max(mc_arr) - np.min(mc_arr)) ) * (np.max(output_data[confidence_column_name]) - np.min(output_data[confidence_column_name])) + np.min(output_data[confidence_column_name])
-
-                    # In case the model confidence is smaller than that yielded after scaling, use the model confidence directly, replaced negative numbers with zero confidence
-                    for i in range(len(output_data[f'{predicted_col}_model_confidence'])):
-                        if output_data[f'{predicted_col}_model_confidence'][i] < 0:
-                            output_data[f'{predicted_col}_model_confidence'][i] = 0
-                        output_data[f'{predicted_col}_model_confidence'][i] = min(output_data[f'{predicted_col}_model_confidence'][i],normalized_model_confidences[i])
-
             if mode == 'predict':
                 self.output_data = PredictTransactionOutputData(transaction=self, data=output_data, evaluations=evaluations)
             else:
-                nulled_out_predictions.append(PredictTransactionOutputData(transaction=self, data=output_data, evaluations=evaluations))
+                nulled_out_predictions = PredictTransactionOutputData(transaction=self, data=output_data, evaluations=evaluations)
 
         if self.lmd['run_confidence_variation_analysis']:
-            input_confidence_arr = [{}]
+            input_confidence = {}
+            extra_insights = {}
 
             for predicted_col in self.lmd['predict_columns']:
-                input_confidence_arr[0][predicted_col] = {'column_names': [], 'confidence_variation': []}
-                actual_confidence = self.output_data[0].explain()[predicted_col][0]['confidence']
-                for i in range(len(nulled_out_columns)):
-                    nulled_confidence = nulled_out_predictions[0][i].explain()[predicted_col][0]['confidence']
-                    nulled_col_name = nulled_out_columns[i]
+                input_confidence[predicted_col] = []
+                extra_insights[predicted_col] = {'if_missing':[]}
+
+                actual_confidence = self.output_data[0].explanation[predicted_col]['confidence']
+
+                for i, nulled_col_name in enumerate(nulled_out_columns):
+                    nulled_out_predicted_value = nulled_out_predictions[i].explanation[predicted_col]['predicted_value']
+                    nulled_confidence = nulled_out_predictions[i].explanation[predicted_col]['confidence']
                     confidence_variation = actual_confidence - nulled_confidence
 
-                    input_confidence_arr[0][predicted_col]['column_names'].append(nulled_col_name)
-                    input_confidence_arr[0][predicted_col]['confidence_variation'].append(confidence_variation)
+                    input_confidence[predicted_col].append({nulled_col_name: round(confidence_variation)})
+                    extra_insights[predicted_col]['if_missing'].append({nulled_col_name: nulled_out_predicted_value})
 
-                input_confidence_arr[0][predicted_col]['confidence_variation_score'] = list(np.interp(input_confidence_arr[0][predicted_col]['confidence_variation'], (np.min(input_confidence_arr[0][predicted_col]['confidence_variation']), np.max(input_confidence_arr[0][predicted_col]['confidence_variation'])), (-100, 100)))
-
-            self.output_data.input_confidence_arr = input_confidence_arr
-
+            self.output_data.input_confidence = input_confidence
+            self.output_data.extra_insights = extra_insights
         return
 
 

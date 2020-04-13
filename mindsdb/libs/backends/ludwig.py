@@ -14,7 +14,6 @@ import pandas as pd
 from imageio import imread
 
 
-# @TODO: Define generci interface, similar to 'base_module' in the phases
 class LudwigBackend():
 
     def __init__(self, transaction):
@@ -414,7 +413,7 @@ class LudwigBackend():
                 if k not in self.transaction.lmd['model_accuracy']['train']:
                     self.transaction.lmd['model_accuracy']['train'][k] = []
                     self.transaction.lmd['model_accuracy']['test'][k] = []
-                elif k is not 'combined':
+                elif k != 'combined':
                     # We should be adding the accuracy here but we only have it for combined, so, for now use that, will only affect multi-output scenarios anyway
                     pass
                 else:
@@ -439,7 +438,10 @@ class LudwigBackend():
         self.transaction.lmd['ludwig_data'] = {'ludwig_save_path': ludwig_model_savepath}
         self.transaction.hmd['ludwig_data'] = {'model_definition': model_definition}
 
-    def predict(self, mode='predict', ignore_columns=[]):
+    def predict(self, mode='predict', ignore_columns=None):
+        if ignore_columns is None:
+            ignore_columns = []
+
         predict_dataframe, model_definition, timeseries_cols, has_heavy_data, _ = self._create_ludwig_dataframe(mode)
         model_definition = self.transaction.hmd['ludwig_data']['model_definition']
 

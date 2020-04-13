@@ -4,6 +4,7 @@ import math
 import sys
 
 import pandas as pd
+
 from mindsdb.libs.constants.mindsdb import *
 from mindsdb.libs.phases.base_module import BaseModule
 from mindsdb.libs.helpers.text_helpers import clean_float
@@ -36,10 +37,6 @@ class DataTransformer(BaseModule):
                 date = datetime.datetime.utcfromtimestamp(date_str)
             except:
                 return None
-        # Uncomment if we want to work internally date type
-        #return date.date()
-
-        # Uncomment if we want to work internally with string type
         return date.strftime('%Y-%m-%d')
 
     @staticmethod
@@ -52,11 +49,7 @@ class DataTransformer(BaseModule):
                 dt = datetime.datetime.utcfromtimestamp(date_str)
             except:
                 return None
-        # Uncomment if we want to work internally date type
-        #return dt
 
-        # Uncomment if we want to work internally with string type
-        # @TODO Decide if we ever need/want the milliseconds
         return dt.strftime('%Y-%m-%d %H:%M:%S')
 
     @staticmethod
@@ -65,7 +58,6 @@ class DataTransformer(BaseModule):
         try:
             return dt.timestamp()
         except:
-            # @TODO Return `None` after appropriate changes in lightwood
             return None
 
     @staticmethod
@@ -88,7 +80,6 @@ class DataTransformer(BaseModule):
 
     def run(self, input_data):
         for column in input_data.columns:
-
             if column in self.transaction.lmd['columns_to_ignore']:
                 continue
 
@@ -113,6 +104,9 @@ class DataTransformer(BaseModule):
                 self._aply_to_all_data(input_data, column, str, self.transaction.lmd['type'])
                 self._cast_all_data(input_data, column, 'category', self.transaction.lmd['type'])
 
+            if data_subtype == DATA_SUBTYPES.TEXT:
+                self._aply_to_all_data(input_data, column, str, self.transaction.lmd['type'])
+
             if self.transaction.hmd['model_backend'] == 'lightwood':
                 if data_type == DATA_TYPES.DATE:
                     self._aply_to_all_data(input_data, column, self._standardize_datetime, self.transaction.lmd['type'])
@@ -125,6 +119,7 @@ class DataTransformer(BaseModule):
         # Un-bias dataset for training
         for column in self.transaction.lmd['predict_columns']:
             if self.transaction.lmd['column_stats'][column]['data_type'] == DATA_TYPES.CATEGORICAL and self.transaction.lmd['equal_accuracy_for_all_output_categories'] == True and self.transaction.lmd['type'] == TRANSACTION_LEARN:
+
                 occurance_map = {}
                 ciclying_map = {}
 
@@ -141,14 +136,15 @@ class DataTransformer(BaseModule):
 
                         if column in self.transaction.lmd['output_categories_importance_dictionary']:
                             if val in self.transaction.lmd['output_categories_importance_dictionary'][column]:
-                                lightwood_weight_map[val] = lightwood_weight_map[val] * self.transaction.lmd['output_categories_importance_dictionary'][column][val]
+                                lightwood_weight_map[val] = self.transaction.lmd['output_categories_importance_dictionary'][column][val]
                             elif '<default>' in self.transaction.lmd['output_categories_importance_dictionary'][column]:
-                                lightwood_weight_map[val] = lightwood_weight_map[val] * self.transaction.lmd['output_categories_importance_dictionary'][column]['<default>']
+                                lightwood_weight_map[val] = self.transaction.lmd['output_categories_importance_dictionary'][column]['<default>']
 
                     self.transaction.lmd['weight_map'][column] = lightwood_weight_map
 
+                #print(self.transaction.lmd['weight_map'])
                 column_is_weighted_in_train = column in self.transaction.lmd['weight_map']
-                column_is_weighted_in_train = False
+
                 if column_is_weighted_in_train:
                     dfs = ['input_data.validation_df']
                 else:
@@ -156,10 +152,13 @@ class DataTransformer(BaseModule):
 
                 total_len = (len(input_data.train_df) + len(input_data.test_df) + len(input_data.validation_df))
                 # Since pandas doesn't support append in-place we'll just do some eval-based hacks
+
                 for dfn in dfs:
                     max_val_occurances_in_set = int(round(max_val_occurances * len(eval(dfn))/total_len))
                     for val in occurance_map:
                         valid_rows = eval(dfn)[eval(dfn)[column] == val]
+                        if len(valid_rows) == 0:
+                            continue
 
                         appended_times = 0
                         while max_val_occurances_in_set > len(valid_rows) * (2 + appended_times):

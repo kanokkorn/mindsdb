@@ -199,11 +199,7 @@ def compute_similariy_score(stats, columns, col_name):
         if other_col_name == col_name:
             continue
         else:
-            # @TODO Figure out why computing matthews_corrcoef is so slow, possibly find a better implementation and replace it with that
-            #try:
-            #    similarity = matthews_corrcoef(list(map(str,col_data)), list(map(str,columns[other_col_name])))
-            #    similarities.append((other_col_name,similarity))
-            #except:
+            # @TODO Figure out why computing matthews_corrcoef is so slow, possibly find a better implementation and replace it with that. Matthews corrcoef code was: similarity = matthews_corrcoef(list(map(str,col_data)), list(map(str,columns[other_col_name])))
             similarity = 0
             X1 = list(map(str,col_data))
             X2 = list(map(str,columns[other_col_name]))
@@ -323,7 +319,7 @@ def compute_redundancy_score(stats, col_name):
     redundancy_score = (col_stats['similarity_score'])/1
     return {'redundancy_score': redundancy_score
         ,'redundancy_score_description':"""
-        A high value in this score indicates the data in this column is highly redundant for making any sort of prediction, you should make sure that values heavily related to this column are no already expressed in another column (e.g. if this column is a timestamp, make sure you don't have another column representing the exact same time in ISO datetime format).
+        A high value in this score indicates the data in this column is highly redundant for making any sort of prediction, you should make sure that values heavily related to this column are not already expressed in another column (e.g. if this column is a timestamp, make sure you don't have another column representing the exact same time in ISO datetime format).
         The value is based in equal part on the Similarity Score and the Correlation Score.
         """}
 

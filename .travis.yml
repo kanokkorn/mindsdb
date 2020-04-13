@@ -2,21 +2,36 @@ language: python
 
 matrix:
   include:
-    - name: "Python 3.7.3 on Ubuntu 16.0.4"
+    - name: "Python 3.7 on Ubuntu 16.0.4"
       os: linux
-      python: 3.7.3
+      python: 3.7
       node: 11.15.0
       dist: xenial
       sudo: true
       env:
         DEPLOYMENT_ENV="true"
+        BADGE=linux
       services:
         - docker
+
+    - name: "Python 3.6 on Ubuntu 16.0.4"
+      os: linux
+      python: 3.6
+      node: 11.15.0
+      dist: xenial
+
+    - name: "Python 3.8 on Ubuntu 16.0.4"
+      os: linux
+      python: 3.8
+      node: 11.15.0
+      dist: xenial
 
     - name: "Python 3.7.2 on OSX"
       os: osx
       language: shell
       dist: xcode10.2
+      env:
+        BADGE=osx
 
     - name: "Python 3.7.3 on Windows"
       os: windows           # Windows 10.0.17134 N/A Build 17134
@@ -24,7 +39,10 @@ matrix:
       before_install:
         - choco install python --version=3.7.3
         - python -m pip install --upgrade pip
-      env: PATH=/c/Python37:/c/Python37/Scripts:$PATH
+      env:
+        PATH=/c/Python37:/c/Python37/Scripts:$PATH
+        BADGE=windows
+
 
 notifications:
   # send notifications only on master failure
@@ -42,6 +60,8 @@ script:
   - if [ "$TRAVIS_OS_NAME" = "windows" ]; then travis_wait 15 python fast_test.py; fi
   - if [ "$TRAVIS_OS_NAME" != "windows" ]; then travis_wait 15 python3 full_test.py; fi
   - cd ../..
+  - pip install flake8
+  - flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 
 before_deploy:
   - if [[ "$DEPLOYMENT_ENV" = "true" && "$TRAVIS_BRANCH" = "master" ]]; then cd docs/website/website; fi

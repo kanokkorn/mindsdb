@@ -158,7 +158,8 @@ class LightwoodBackend():
                 self.transaction.log.debug(f'We\'ve reached training epoch nr {epoch} with an accuracy of {value_pct}% on the testing dataset')
 
     def train(self):
-        lightwood.config.config.CONFIG.USE_CUDA = self.transaction.lmd['use_gpu']
+        if self.transaction.lmd['use_gpu'] is not None:
+            lightwood.config.config.CONFIG.USE_CUDA = self.transaction.lmd['use_gpu']
         lightwood.config.config.CONFIG.CACHE_ENCODED_DATA = not self.transaction.lmd['force_disable_cache']
         lightwood.config.config.CONFIG.SELFAWARE = self.transaction.lmd['use_selfaware_model']
 
@@ -198,8 +199,11 @@ class LightwoodBackend():
         self.transaction.lmd['lightwood_data']['save_path'] = os.path.join(CONFIG.MINDSDB_STORAGE_PATH, self.transaction.lmd['name'] + '_lightwood_data')
         self.predictor.save(path_to=self.transaction.lmd['lightwood_data']['save_path'])
 
-    def predict(self, mode='predict', ignore_columns=[]):
-        lightwood.config.config.CONFIG.USE_CUDA = self.transaction.lmd['use_gpu']
+    def predict(self, mode='predict', ignore_columns=None):
+        if ignore_columns is None:
+            ignore_columns = []
+        if self.transaction.lmd['use_gpu'] is not None:
+            lightwood.config.config.CONFIG.USE_CUDA = self.transaction.lmd['use_gpu']
         lightwood.config.config.CONFIG.CACHE_ENCODED_DATA = not self.transaction.lmd['force_disable_cache']
         lightwood.config.config.CONFIG.SELFAWARE = self.transaction.lmd['use_selfaware_model']
 
@@ -231,7 +235,23 @@ class LightwoodBackend():
         formated_predictions = {}
         for k in predictions:
             formated_predictions[k] = predictions[k]['predictions']
-            if 'confidences' in predictions[k]:
-                formated_predictions[f'{k}_confidences'] = predictions[k]['confidences']
+
+            confidence_arr = []
+            for confidence_name in ['selfaware_confidences','loss_confidences', 'quantile_confidences']:
+                if confidence_name in predictions[k]:
+                    conf_arr = [x if x > 0 else 0 for x in predictions[k][confidence_name]]
+                    confidence_arr.append(conf_arr)
+
+            if len(confidence_arr) > 0:
+                confidences = []
+                for n in range(len(confidence_arr[0])):
+                    confidences.append([])
+                    for i in range(len(confidence_arr)):
+                        confidences[-1].append(confidence_arr[i][n])
+                    confidences[-1] = sum(confidences[-1])/len(confidences[-1])
+                formated_predictions[f'{k}_model_confidence'] = confidences
+
+            if 'confidence_range' in predictions[k]:
+                formated_predictions[f'{k}_confidence_range'] = predictions[k]['confidence_range']
 
         return formated_predictions

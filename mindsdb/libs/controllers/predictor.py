@@ -4,7 +4,6 @@ import os
 import uuid
 import traceback
 import pickle
-import shutil
 
 from mindsdb.libs.data_types.mindsdb_logger import MindsdbLogger
 from mindsdb.libs.helpers.multi_data_source import getDS
@@ -42,10 +41,19 @@ class Predictor:
             except:
                 self.log.warning('Could not check for updates !')
 
-        # If storage path is not writable, raise an exception as this can no longer be
-        if not os.access(CONFIG.MINDSDB_STORAGE_PATH, os.W_OK):
-            error_message = '''Cannot write into storage path, please either set the config variable mindsdb.config.set('MINDSDB_STORAGE_PATH',<path>) or give write access to {folder}'''
-            raise ValueError(error_message.format(folder=CONFIG.MINDSDB_STORAGE_PATH))
+        if not CONFIG.SAGEMAKER:
+            # If storage path is not writable, raise an exception as this can no longer be
+            if not os.access(CONFIG.MINDSDB_STORAGE_PATH, os.W_OK):
+                error_message = '''Cannot write into storage path, please either set the config variable mindsdb.config.set('MINDSDB_STORAGE_PATH',<path>) or give write access to {folder}'''
+                self.log.warning(error_message.format(folder=CONFIG.MINDSDB_STORAGE_PATH))
+                raise ValueError(error_message.format(folder=CONFIG.MINDSDB_STORAGE_PATH))
+
+
+            # If storage path is not writable, raise an exception as this can no longer be
+            if not os.access(CONFIG.MINDSDB_STORAGE_PATH, os.R_OK):
+                error_message = '''Cannot read from storage path, please either set the config variable mindsdb.config.set('MINDSDB_STORAGE_PATH',<path>) or give write access to {folder}'''
+                self.log.warning(error_message.format(folder=CONFIG.MINDSDB_STORAGE_PATH))
+                raise ValueError(error_message.format(folder=CONFIG.MINDSDB_STORAGE_PATH))
 
     def get_models(self):
         models = []
@@ -175,7 +183,7 @@ class Predictor:
                 # CLF based score to be included here once we find a faster way of computing it...
                 similarity_score_based_most_correlated_column = col_stats['most_similar_column_name']
 
-                simple_description = f"A low value indicates that the data in this column is highly redundant (useless) for making any sort of prediction. You should make sure that values heavily related to this column are no already expressed in the \"{similarity_score_based_most_correlated_column}\" column (e.g. if this column is a timestamp, make sure you don't have another column representing the exact same time in ISO datetime format)"
+                simple_description = f"A low value indicates that the data in this column is highly redundant (useless) for making any sort of prediction. You should make sure that values heavily related to this column are not already expressed in the \"{similarity_score_based_most_correlated_column}\" column (e.g. if this column is a timestamp, make sure you don't have another column representing the exact same time in ISO datetime format)"
 
 
                 metrics.append({
@@ -400,15 +408,15 @@ class Predictor:
                 model_names.append(model_name)
 
 
-        for moel_name in model_names:
+        for model_name in model_names:
             with open(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, model_name + '_light_model_metadata.pickle'), 'rb') as fp:
                 lmd = pickle.load(fp)
 
             if 'ludwig_data' in lmd and 'ludwig_save_path' in lmd['ludwig_data']:
-                lmd['ludwig_data']['ludwig_save_path'] = str(os.path.join(CONFIG.MINDSDB_STORAGE_PATH),os.path.basename(lmd['ludwig_data']['ludwig_save_path']))
+                lmd['ludwig_data']['ludwig_save_path'] = str(os.path.join(CONFIG.MINDSDB_STORAGE_PATH,os.path.basename(lmd['ludwig_data']['ludwig_save_path'])))
 
             if 'lightwood_data' in lmd and 'save_path' in lmd['lightwood_data']:
-                lmd['lightwood_data']['save_path'] = str(os.path.join(CONFIG.MINDSDB_STORAGE_PATH),os.path.basename(lmdlmd['lightwood_data']['save_path']))
+                lmd['lightwood_data']['save_path'] = str(os.path.join(CONFIG.MINDSDB_STORAGE_PATH,os.path.basename(lmd['lightwood_data']['save_path'])))
 
             with open(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, model_name + '_light_model_metadata.pickle'), 'wb') as fp:
                 pickle.dump(lmd, fp,protocol=pickle.HIGHEST_PROTOCOL)
@@ -447,10 +455,10 @@ class Predictor:
             return False
 
         with open(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, old_model_name + '_light_model_metadata.pickle'), 'rb') as fp:
-            lmd =pickle.load(fp)
+            lmd = pickle.load(fp)
 
         with open(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, old_model_name + '_heavy_model_metadata.pickle'), 'rb') as fp:
-            hmd =pickle.load(fp)
+            hmd = pickle.load(fp)
 
         lmd['name'] = new_model_name
         hmd['name'] = new_model_name
@@ -478,9 +486,6 @@ class Predictor:
             pickle.dump(hmd, fp,protocol=pickle.HIGHEST_PROTOCOL)
 
 
-
-
-
         os.remove(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, old_model_name + '_light_model_metadata.pickle'))
         os.remove(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, old_model_name + '_heavy_model_metadata.pickle'))
         return True
@@ -493,6 +498,20 @@ class Predictor:
         :param model_name: this is the name of the model you wish to export (defaults to the name of the current Predictor)
         :return: bool (True/False) True if mind was exported successfully
         """
+
+        with open(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, model_name + '_light_model_metadata.pickle'), 'rb') as fp:
+            lmd = pickle.load(fp)
+
+            try:
+                os.remove(lmd['lightwood_data']['save_path'])
+            except:
+                pass
+
+            try:
+                shutil.rmtree(lmd['ludwig_data']['ludwig_save_path'])
+            except:
+                pass
+
         if model_name is None:
             model_name = self.name
         try:
@@ -503,7 +522,7 @@ class Predictor:
             print(e)
             return False
 
-    def analyse_dataset(self, from_data, sample_margin_of_error=CONFIG.DEFAULT_MARGIN_OF_ERROR):
+    def analyse_dataset(self, from_data, sample_margin_of_error=0.005):
         """
         Analyse the particular dataset being given
         """
@@ -538,7 +557,8 @@ class Predictor:
         Transaction(session=self, light_transaction_metadata=light_transaction_metadata, heavy_transaction_metadata=heavy_transaction_metadata, logger=self.log)
         return self.get_model_data(model_name=None, lmd=light_transaction_metadata)
 
-    def learn(self, to_predict, from_data, test_from_data=None, group_by = None, window_size = None, order_by = [], sample_margin_of_error = CONFIG.DEFAULT_MARGIN_OF_ERROR, ignore_columns = [], stop_training_in_x_seconds = None, stop_training_in_accuracy = None, backend='lightwood', rebuild_model=True, use_gpu=False, disable_optional_analysis=False, equal_accuracy_for_all_output_categories=False, output_categories_importance_dictionary=None, unstable_parameters_dict={}):
+
+    def learn(self, to_predict, from_data, test_from_data=None, group_by = None, window_size = None, order_by = None, sample_margin_of_error = 0.005, ignore_columns = None, stop_training_in_x_seconds = None, stop_training_in_accuracy = None, backend='lightwood', rebuild_model=True, use_gpu=None, disable_optional_analysis=False, equal_accuracy_for_all_output_categories=True, output_categories_importance_dictionary=None, unstable_parameters_dict=None):
         """
         Learn to predict a column or columns from the data in 'from_data'
 
@@ -565,6 +585,15 @@ class Predictor:
 
         :return:
         """
+
+        if order_by is None:
+            order_by = []
+
+        if ignore_columns is None:
+            ignore_columns = []
+
+        if unstable_parameters_dict is None:
+            unstable_parameters_dict = {}
 
         from_ds = getDS(from_data)
         test_from_ds = test_from_data if test_from_data is None else getDS(test_from_data)
@@ -618,7 +647,6 @@ class Predictor:
         light_transaction_metadata['sample_margin_of_error'] = sample_margin_of_error
         light_transaction_metadata['sample_confidence_level'] = sample_confidence_level
         light_transaction_metadata['stop_training_in_x_seconds'] = stop_training_in_x_seconds
-        light_transaction_metadata['stop_training_in_accuracy'] = stop_training_in_accuracy
         light_transaction_metadata['rebuild_model'] = rebuild_model
         light_transaction_metadata['model_accuracy'] = {'train': {}, 'test': {}}
         light_transaction_metadata['column_importances'] = None
@@ -692,7 +720,7 @@ class Predictor:
             with open(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, heavy_transaction_metadata['name'] + '_heavy_model_metadata.pickle'), 'rb') as fp:
                 heavy_transaction_metadata= pickle.load(fp)
 
-            for k in ['data_preparation', 'rebuild_model', 'data_source', 'type', 'columns_to_ignore', 'sample_margin_of_error', 'sample_confidence_level', 'stop_training_in_x_seconds', 'stop_training_in_accuracy']:
+            for k in ['data_preparation', 'rebuild_model', 'data_source', 'type', 'columns_to_ignore', 'sample_margin_of_error', 'sample_confidence_level', 'stop_training_in_x_seconds']:
                 if old_lmd[k] is not None: light_transaction_metadata[k] = old_lmd[k]
 
             for k in ['from_data', 'test_from_data']:
@@ -700,7 +728,7 @@ class Predictor:
         Transaction(session=self, light_transaction_metadata=light_transaction_metadata, heavy_transaction_metadata=heavy_transaction_metadata, logger=self.log)
 
 
-    def predict(self, when={}, when_data = None, update_cached_model = False, use_gpu=None, unstable_parameters_dict={}, backend=None, run_confidence_variation_analysis=False):
+    def predict(self, when=None, when_data=None, update_cached_model = False, use_gpu=None, unstable_parameters_dict=None, backend=None, run_confidence_variation_analysis=False):
         """
         You have a mind trained already and you want to make a prediction
 
@@ -711,6 +739,12 @@ class Predictor:
 
         :return: TransactionOutputData object
         """
+
+        if when is None:
+            when = {}
+
+        if unstable_parameters_dict is None:
+            unstable_parameters_dict = {}
 
         if run_confidence_variation_analysis is True and when_data is not None:
             self.log.error('run_confidence_variation_analysis=True is a valid option only when predicting a single data point via `when`')
