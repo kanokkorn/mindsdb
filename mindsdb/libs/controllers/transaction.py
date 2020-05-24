@@ -66,14 +66,16 @@ class Transaction:
         try:
             with open(fn, 'rb') as fp:
                 self.lmd = pickle.load(fp)
-        except:
+        except Exception as e:
+            self.log.error(e)
             self.log.error(f'Could not load mindsdb light metadata from the file: {fn}')
 
         fn = os.path.join(CONFIG.MINDSDB_STORAGE_PATH, self.hmd['name'] + '_heavy_model_metadata.pickle')
         try:
             with open(fn, 'rb') as fp:
                 self.hmd = pickle.load(fp)
-        except:
+        except Exception as e:
+            self.log.error(e)
             self.log.error(f'Could not load mindsdb heavy metadata in the file: {fn}')
 
 
@@ -83,8 +85,9 @@ class Transaction:
         try:
             with open(fn, 'wb') as fp:
                 pickle.dump(self.lmd, fp,protocol=pickle.HIGHEST_PROTOCOL)
-        except:
-            self.log.error(f'Could not save mindsdb heavy metadata in the file: {fn}')
+        except Exception as e:
+            self.log.error(e)
+            self.log.error(f'Could not save mindsdb light metadata in the file: {fn}')
 
         fn = os.path.join(CONFIG.MINDSDB_STORAGE_PATH, self.hmd['name'] + '_heavy_model_metadata.pickle')
         save_hmd = {}
@@ -96,17 +99,18 @@ class Transaction:
         for k in self.hmd:
             if k not in null_out_fields:
                 save_hmd[k] = self.hmd[k]
-            if k == 'model_backend' and type(self.hmd['model_backend']) != type(str()):
+            if k == 'model_backend' and not isinstance(self.hmd['model_backend'], str):
                 save_hmd[k] = None
 
         try:
             with open(fn, 'wb') as fp:
                 # Don't save data for now
                 pickle.dump(save_hmd, fp,protocol=pickle.HIGHEST_PROTOCOL)
-        except:
-            self.log.error(f'Could not save mindsdb light metadata in the file: {fn}')
+        except Exception as e:
+            self.log.error(e)
+            self.log.error(f'Could not save mindsdb heavy metadata in the file: {fn}')
 
-    def _call_phase_module(self, clean_exit, module_name, **kwargs):
+    def _call_phase_module(self, module_name, **kwargs):
         """
         Loads the module and runs it
 
@@ -125,10 +129,7 @@ class Transaction:
             error = 'Could not load module {module_name}'.format(module_name=module_name)
             self.log.error('Could not load module {module_name}'.format(module_name=module_name))
             self.log.error(traceback.format_exc())
-            if clean_exit:
-                sys.exit(1)
-            else:
-                raise Exception(error)
+            raise Exception(error)
         finally:
             self.lmd['is_active'] = False
 
@@ -136,11 +137,11 @@ class Transaction:
         self.lmd['current_phase'] = MODEL_STATUS_PREPARING
         self.save_metadata()
 
-        self._call_phase_module(clean_exit=True, module_name='DataExtractor')
+        self._call_phase_module(module_name='DataExtractor')
         self.save_metadata()
 
         self.lmd['current_phase'] = MODEL_STATUS_DATA_ANALYSIS
-        self._call_phase_module(clean_exit=True, module_name='StatsGenerator', input_data=self.input_data, modify_light_metadata=True, hmd=self.hmd)
+        self._call_phase_module(module_name='StatsGenerator', input_data=self.input_data, modify_light_metadata=True, hmd=self.hmd)
         self.save_metadata()
 
         self.lmd['current_phase'] = MODEL_STATUS_DONE
@@ -155,7 +156,7 @@ class Transaction:
             self.lmd['current_phase'] = MODEL_STATUS_PREPARING
             self.save_metadata()
 
-            self._call_phase_module(clean_exit=False, module_name='DataExtractor')
+            self._call_phase_module(module_name='DataExtractor')
             self.save_metadata()
 
             self.lmd['current_phase'] = MODEL_STATUS_DATA_ANALYSIS
@@ -163,19 +164,19 @@ class Transaction:
                 self.load_metadata()
             else:
                 self.save_metadata()
-                self._call_phase_module(clean_exit=False, module_name='StatsGenerator', input_data=self.input_data, modify_light_metadata=True, hmd=self.hmd)
+                self._call_phase_module(module_name='StatsGenerator', input_data=self.input_data, modify_light_metadata=True, hmd=self.hmd)
                 self.save_metadata()
 
-            self._call_phase_module(clean_exit=False, module_name='DataSplitter')
+            self._call_phase_module(module_name='DataSplitter')
 
-            self._call_phase_module(clean_exit=False, module_name='DataTransformer', input_data=self.input_data)
+            self._call_phase_module(module_name='DataTransformer', input_data=self.input_data)
             self.lmd['current_phase'] = MODEL_STATUS_TRAINING
             self.save_metadata()
-            self._call_phase_module(clean_exit=False, module_name='ModelInterface', mode='train')
+            self._call_phase_module(module_name='ModelInterface', mode='train')
 
             self.lmd['current_phase'] = MODEL_STATUS_ANALYZING
             self.save_metadata()
-            self._call_phase_module(clean_exit=False, module_name='ModelAnalyzer')
+            self._call_phase_module(module_name='ModelAnalyzer')
 
             self.lmd['current_phase'] = MODEL_STATUS_TRAINED
             self.save_metadata()
@@ -218,13 +219,13 @@ class Transaction:
             self.log.error('No metadata found for this model')
             return
 
-        self._call_phase_module(clean_exit=True, module_name='DataExtractor')
+        self._call_phase_module(module_name='DataExtractor')
 
         if self.input_data.data_frame.shape[0] <= 0:
             self.log.error('No input data provided !')
             return
         if self.lmd['model_is_time_series']:
-            self._call_phase_module(clean_exit=True, module_name='DataSplitter')
+            self._call_phase_module(module_name='DataSplitter')
 
         # @TODO Maybe move to a separate "PredictionAnalysis" phase ?
         if self.lmd['run_confidence_variation_analysis']:
@@ -246,15 +247,17 @@ class Transaction:
                 else:
                     self.input_data.data_frame = nulled_out_data
 
-            self._call_phase_module(clean_exit=True, module_name='DataTransformer', input_data=self.input_data)
+            self._call_phase_module(module_name='DataTransformer', input_data=self.input_data)
 
-            self._call_phase_module(clean_exit=True, module_name='ModelInterface', mode='predict')
+            self._call_phase_module(module_name='ModelInterface', mode='predict')
 
             output_data = {col: [] for col in self.lmd['columns']}
-            evaluations = {}
 
             for column in self.input_data.columns:
-                output_data[column] = list(self.input_data.data_frame[column])
+                if column in self.lmd['predict_columns']:
+                    output_data[f'__observed_{column}'] = list(self.input_data.data_frame[column])
+                else:
+                    output_data[column] = list(self.input_data.data_frame[column])
 
             for predicted_col in self.lmd['predict_columns']:
                 output_data[predicted_col] = list(self.hmd['predictions'][predicted_col])
@@ -263,35 +266,31 @@ class Transaction:
                         output_data[extra_column] = self.hmd['predictions'][extra_column]
 
                 probabilistic_validator = unpickle_obj(self.hmd['probabilistic_validators'][predicted_col])
-                confidence_column_name = f'{predicted_col}_confidence'
-                output_data[confidence_column_name] = [None] * len(output_data[predicted_col])
-                evaluations[predicted_col] = [None] * len(output_data[predicted_col])
+                output_data[f'{predicted_col}_confidence'] = [None] * len(output_data[predicted_col])
 
                 output_data[f'model_{predicted_col}'] = deepcopy(output_data[predicted_col])
                 for row_number, predicted_value in enumerate(output_data[predicted_col]):
 
                     # Compute the feature existance vector
                     input_columns = [col for col in self.input_data.columns if col not in self.lmd['predict_columns']]
-                    features_existance_vector = [False if output_data[col][row_number] is None else True for col in input_columns if col not in self.lmd['columns_to_ignore']]
+                    features_existance_vector = [False if  str(output_data[col][row_number]) in ('None', 'nan', '', 'Nan', 'NAN', 'NaN') else True for col in input_columns if col not in self.lmd['columns_to_ignore']]
 
                     # Create the probabilsitic evaluation
-                    prediction_evaluation = probabilistic_validator.evaluate_prediction_accuracy(features_existence=features_existance_vector, predicted_value=predicted_value)
+                    probability_true_prediction = probabilistic_validator.evaluate_prediction_accuracy(features_existence=features_existance_vector, predicted_value=predicted_value)
 
-                    output_data[predicted_col][row_number] = prediction_evaluation.final_value
-                    output_data[confidence_column_name][row_number] = prediction_evaluation.most_likely_probability
-                    evaluations[predicted_col][row_number] = prediction_evaluation
+                    output_data[f'{predicted_col}_confidence'][row_number] = probability_true_prediction
 
             if mode == 'predict':
-                self.output_data = PredictTransactionOutputData(transaction=self, data=output_data, evaluations=evaluations)
+                self.output_data = PredictTransactionOutputData(transaction=self, data=output_data)
             else:
-                nulled_out_predictions = PredictTransactionOutputData(transaction=self, data=output_data, evaluations=evaluations)
+                nulled_out_predictions = PredictTransactionOutputData(transaction=self, data=output_data)
 
         if self.lmd['run_confidence_variation_analysis']:
             input_confidence = {}
             extra_insights = {}
 
             for predicted_col in self.lmd['predict_columns']:
-                input_confidence[predicted_col] = []
+                input_confidence[predicted_col] = {}
                 extra_insights[predicted_col] = {'if_missing':[]}
 
                 actual_confidence = self.output_data[0].explanation[predicted_col]['confidence']
@@ -299,9 +298,10 @@ class Transaction:
                 for i, nulled_col_name in enumerate(nulled_out_columns):
                     nulled_out_predicted_value = nulled_out_predictions[i].explanation[predicted_col]['predicted_value']
                     nulled_confidence = nulled_out_predictions[i].explanation[predicted_col]['confidence']
+                    print(actual_confidence - nulled_confidence, actual_confidence, nulled_confidence)
                     confidence_variation = actual_confidence - nulled_confidence
 
-                    input_confidence[predicted_col].append({nulled_col_name: round(confidence_variation)})
+                    input_confidence[predicted_col][nulled_col_name] = round(confidence_variation,3)
                     extra_insights[predicted_col]['if_missing'].append({nulled_col_name: nulled_out_predicted_value})
 
             self.output_data.input_confidence = input_confidence

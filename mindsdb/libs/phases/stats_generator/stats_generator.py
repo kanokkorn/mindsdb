@@ -213,8 +213,9 @@ class StatsGenerator(BaseModule):
 
         # If a mix of dates and numbers interpret all as dates
         if DATA_TYPES.DATE in type_dist and len(set(type_dist.keys()) - set([DATA_TYPES.NUMERIC])) == 1:
-            type_dist[DATA_TYPES.DATE] += type_dist[DATA_TYPES.NUMERIC]
-            del type_dist[DATA_TYPES.NUMERIC]
+            if DATA_TYPES.NUMERIC in type_dist:
+                type_dist[DATA_TYPES.DATE] += type_dist[DATA_TYPES.NUMERIC]
+                del type_dist[DATA_TYPES.NUMERIC]
 
             if DATA_SUBTYPES.FLOAT in subtype_dist:
                 subtype_dist[DATA_SUBTYPES.TIMESTAMP] += subtype_dist[DATA_SUBTYPES.FLOAT]
@@ -293,7 +294,7 @@ class StatsGenerator(BaseModule):
     def get_words_histogram(data, is_full_text=False):
         """ Returns an array of all the words that appear in the dataset and the number of times each word appears in the dataset """
 
-        splitter = lambda w, t: [wi.split(t) for wi in w] if type(w) == type([]) else splitter(w,t)
+        splitter = lambda w, t: [wi.split(t) for wi in w] if isinstance(w, list) else splitter(w, t)
 
         if is_full_text:
             # get all words in every cell and then calculate histograms

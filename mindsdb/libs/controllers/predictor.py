@@ -274,6 +274,14 @@ class Predictor:
                     confusion_matrix = lmd['confusion_matrices'][col]
                 else:
                     confusion_matrix = None
+
+                if 'accuracy_samples' in lmd and col in lmd['accuracy_samples']:
+                    accuracy_samples = lmd['accuracy_samples'][col]
+                else:
+                    accuracy_samples = None
+
+
+
                 # Model analysis building for each of the predict columns
                 mao = {
                     'column_name': col
@@ -298,6 +306,7 @@ class Predictor:
                         ,'x_explained': []
                   }
                   ,"confusion_matrix": confusion_matrix
+                  ,"accuracy_samples": accuracy_samples
                 }
 
 
@@ -318,13 +327,14 @@ class Predictor:
                     mao['accuracy_histogram']['x'] = [f'{x}' for x in lmd['accuracy_histogram'][col]['buckets']]
                     mao['accuracy_histogram']['y'] = lmd['accuracy_histogram'][col]['accuracies']
 
-                    for output_col_bucket in lmd['columns_buckets_importances'][col]:
-                        x_explained_member = []
-                        for input_col in lmd['columns_buckets_importances'][col][output_col_bucket]:
-                            stats = lmd['columns_buckets_importances'][col][output_col_bucket][input_col]
-                            adapted_sub_incol = self._adapt_column(stats, input_col)
-                            x_explained_member.append(adapted_sub_incol)
-                        mao['accuracy_histogram']['x_explained'].append(x_explained_member)
+                    if lmd['columns_buckets_importances'] is not None and col in lmd['columns_buckets_importances']:
+                        for output_col_bucket in lmd['columns_buckets_importances'][col]:
+                            x_explained_member = []
+                            for input_col in lmd['columns_buckets_importances'][col][output_col_bucket]:
+                                stats = lmd['columns_buckets_importances'][col][output_col_bucket][input_col]
+                                adapted_sub_incol = self._adapt_column(stats, input_col)
+                                x_explained_member.append(adapted_sub_incol)
+                            mao['accuracy_histogram']['x_explained'].append(x_explained_member)
 
                     for icol in lmd['model_columns_map'].keys():
                         if icol in lmd['columns_to_ignore']:
@@ -558,7 +568,7 @@ class Predictor:
         return self.get_model_data(model_name=None, lmd=light_transaction_metadata)
 
 
-    def learn(self, to_predict, from_data, test_from_data=None, group_by = None, window_size = None, order_by = None, sample_margin_of_error = 0.005, ignore_columns = None, stop_training_in_x_seconds = None, stop_training_in_accuracy = None, backend='lightwood', rebuild_model=True, use_gpu=None, disable_optional_analysis=False, equal_accuracy_for_all_output_categories=True, output_categories_importance_dictionary=None, unstable_parameters_dict=None):
+    def learn(self, to_predict, from_data, test_from_data=None, group_by=None, window_size=None, order_by=None, sample_margin_of_error=0.005, ignore_columns=None, stop_training_in_x_seconds=None, stop_training_in_accuracy=None, backend='lightwood', rebuild_model=True, use_gpu=None, disable_optional_analysis=False, equal_accuracy_for_all_output_categories=True, output_categories_importance_dictionary=None, unstable_parameters_dict=None):
         """
         Learn to predict a column or columns from the data in 'from_data'
 
@@ -586,34 +596,39 @@ class Predictor:
         :return:
         """
 
+        if ignore_columns is None:
+            ignore_columns = []
+
+        if group_by is None:
+            group_by = []
+
         if order_by is None:
             order_by = []
 
-        if ignore_columns is None:
-            ignore_columns = []
+        # lets turn into lists: predict, ignore, group_by, order_by
+        predict_columns = to_predict if isinstance(to_predict, list) else [to_predict]
+        ignore_columns = ignore_columns if isinstance(ignore_columns, list) else [ignore_columns]
+        group_by = group_by if isinstance(group_by, list) else [group_by]
+        order_by = order_by if isinstance(order_by, list) else [order_by]
+
+        # lets turn order by into list of tuples if not already
+        # each element ('column_name', 'boolean_for_ascending <default=true>')
+        order_by = [col_name if isinstance(col_name, tuple) else (col_name, True) for col_name in order_by]
 
         if unstable_parameters_dict is None:
             unstable_parameters_dict = {}
 
         from_ds = getDS(from_data)
-        test_from_ds = test_from_data if test_from_data is None else getDS(test_from_data)
+
+        test_from_ds = None if test_from_data is None else getDS(test_from_data)
 
         transaction_type = TRANSACTION_LEARN
         sample_confidence_level = 1 - sample_margin_of_error
-
-        # lets turn into lists: predict, order_by and group by
-        predict_columns = [to_predict] if type(to_predict) != type([]) else to_predict
-        group_by = group_by if type(group_by) == type([]) else [group_by] if group_by else []
-        order_by = order_by if type(order_by) == type([]) else [order_by] if order_by else []
 
         if len(predict_columns) == 0:
             error = 'You need to specify a column to predict'
             self.log.error(error)
             raise ValueError(error)
-
-        # lets turn order by into tuples if not already
-        # each element ('column_name', 'boolean_for_ascending <default=true>')
-        order_by = [(col_name, True) if type(col_name) != type(()) else col_name for col_name in order_by]
 
         is_time_series = True if len(order_by) > 0 else False
 
@@ -622,7 +637,7 @@ class Predictor:
         the server doesn't handle non-file data sources at the moment, so this shouldn't prove an issue,
         once we want to support datasources such as s3 and databases for the server we need to add name as a concept (or, preferably, before that)
         '''
-        data_source_name = from_data if type(from_data) == str else 'Unkown'
+        data_source_name = from_data if isinstance(from_data, str) else 'Unkown'
 
         heavy_transaction_metadata = {}
         heavy_transaction_metadata['name'] = self.name
@@ -727,34 +742,60 @@ class Predictor:
                 if old_hmd[k] is not None: heavy_transaction_metadata[k] = old_hmd[k]
         Transaction(session=self, light_transaction_metadata=light_transaction_metadata, heavy_transaction_metadata=heavy_transaction_metadata, logger=self.log)
 
+    def test(self, when_data, accuracy_score_functions, score_using='predicted_value', predict_args=None):
+        """
+        :param when_data: use this when you have data in either a file, a pandas data frame, or url to a file that you want to predict from
+        :param accuracy_score_functions: a single function or  a dictionary for the form `{f'{target_name}': acc_func}` for when we have multiple targets
+        :param score_using: what values from the `explanation` of the target to use in the score function, defaults to the
+        :param predict_args: dictionary of arguments to be passed to `predict`, e.g: `predict_args={'use_gpu': True}`
+
+        :return: a dictionary for the form `{f'{target_name}_accuracy': accuracy_func_return}`, e.g. {'rental_price_accuracy':0.99}
+        """
+        if predict_args is None:
+            predict_args = {}
+
+        predictions = self.predict(when_data=when_data, **predict_args)
+
+        with open(os.path.join(CONFIG.MINDSDB_STORAGE_PATH, f'{self.name}_light_model_metadata.pickle'), 'rb') as fp:
+            lmd = pickle.load(fp)
+
+        accuracy_dict = {}
+        for col in lmd['predict_columns']:
+            if isinstance(accuracy_score_functions, dict):
+                acc_f = accuracy_score_functions[col]
+            else:
+                acc_f = accuracy_score_functions
+
+            accuracy_dict[f'{col}_accuracy'] = acc_f([x[f'__observed_{col}'] for x in predictions], [x.explanation[col][score_using] for x in predictions])
+
+        return accuracy_dict
+
 
     def predict(self, when=None, when_data=None, update_cached_model = False, use_gpu=None, unstable_parameters_dict=None, backend=None, run_confidence_variation_analysis=False):
         """
         You have a mind trained already and you want to make a prediction
 
         :param when: use this if you have certain conditions for a single prediction
-        :param when_data: (optional) use this when you have data in either a file, a pandas data frame, or url to a file that you want to predict from
+        :param when_data: use this when you have data in either a file, a pandas data frame, or url to a file that you want to predict from
         :param update_cached_model: (optional, default:False) when you run predict for the first time, it loads the latest model in memory, you can force it to do this on this run by flipping it to True
         :param run_confidence_variation_analysis: Run a confidence variation analysis on each of the given input column, currently only works when making single predictions via `when`
 
         :return: TransactionOutputData object
         """
 
-        if when is None:
-            when = {}
-
         if unstable_parameters_dict is None:
             unstable_parameters_dict = {}
 
         if run_confidence_variation_analysis is True and when_data is not None:
-            self.log.error('run_confidence_variation_analysis=True is a valid option only when predicting a single data point via `when`')
-            sys.exit(1)
+            error_msg = 'run_confidence_variation_analysis=True is a valid option only when predicting a single data point via `when`'
+            self.log.error(error_msg)
+            raise ValueError(error_msg)
 
         transaction_type = TRANSACTION_PREDICT
         when_ds = None if when_data is None else getDS(when_data)
 
         # lets turn into lists: when
-        when = [when] if type(when) in [type(None), type({})] else when
+        when = [when] if isinstance(when, dict) else when if when is not None else []
 
         heavy_transaction_metadata = {}
         if when_ds is None:

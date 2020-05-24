@@ -9,7 +9,10 @@ import datetime
 import requests
 import mindsdb
 import lightwood
-import ludwig
+try:
+    import ludwig
+except:
+    pass
 
 from helpers import *
 
@@ -44,8 +47,8 @@ def run_benchmarks():
     except:
         pass
 
-    TESTS = ['default_of_credit', 'cancer50', 'pulsar_stars', 'cifar_100', 'imdb_movie_review', 'german_credit_data'] #, 'wine_quality']
-    #TESTS = ['default_of_credit', 'cancer50', 'pulsar_stars', 'german_credit_data']
+    TESTS = ['default_of_credit', 'cancer50', 'pulsar_stars', 'cifar_100', 'imdb_movie_review', 'german_credit_data', 'wine_quality']
+    #TESTS = ['cancer50', 'pulsar_stars']
 
     status = os.system('cp -r ~/mindsdb_examples tmp_downloads')
 
@@ -65,7 +68,6 @@ def run_benchmarks():
         logger.debug(f'\n\n=================================\nRunning test: {test_name}\n=================================\n\n')
 
         os.chdir(f'tmp_downloads/benchmarks/{test_name}')
-
         run_test = importlib.import_module(f'tmp_downloads.benchmarks.{test_name}.mindsdb_acc').run
 
         started = datetime.datetime.now()
@@ -91,11 +93,16 @@ def run_benchmarks():
             ,'backend_used': backend_used
         })
 
+    try:
+        ludwig_version = ludwig.__version__
+    except:
+        ludwig_version = 'not installed'
+
     for test_data in test_data_arr:
         cur.execute("""INSERT INTO mindsdb_accuracy.tests VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",(
             batch_id, batch_started, test_data['test_name'], test_data['dataset_name'],test_data['accuracy'],
             test_data['accuracy_function'], test_data['accuracy_description'],test_data['runtime'], test_data['started'],
-            test_data['ended'], mindsdb.__version__, lightwood.__version__, ludwig.__version__, test_data['backend_used'],
+            test_data['ended'], mindsdb.__version__, lightwood.__version__, ludwig_version, test_data['backend_used'],
             sys.argv[2]
         ))
         con.commit()
