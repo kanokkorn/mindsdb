@@ -1,0 +1,97 @@
+{
+    "api": {
+        "http": {
+            "host": "0.0.0.0",
+            "port": "47334"
+        },
+        "mongodb": {
+            "host": "127.0.0.1",
+            "port": "47336"
+        },
+        "mysql": {
+            "certificate_path": "tests/integration_tests/flows/config/cert.pem",
+            "host": "127.0.0.1",
+            "log": {
+                "console_level": "INFO",
+                "file": "mysql.log",
+                "file_level": "INFO",
+                "folder": "logs/",
+                "format": "%(asctime)s - %(levelname)s - %(message)s"
+            },
+            "password": "",
+            "port": "47335",
+            "user": "mindsdb"
+        }
+    },
+    "config_version": "1.2",
+    "debug": true,
+    "integrations": {
+        "default_clickhouse": {
+            "enabled": true,
+            "host": "localhost",
+            "password": "",
+            "port": 8123,
+            "type": "clickhouse",
+            "user": "default"
+        },
+        "default_mariadb": {
+            "enabled": true,
+            "host": "localhost",
+            "password": "root",
+            "port": 3306,
+            "type": "mariadb",
+            "user": "root"
+        },
+        "default_mysql": {
+            "enabled": true,
+            "host": "localhost",
+            "password": "root",
+            "port": 3307,
+            "type": "mysql",
+            "user": "root"
+        },
+        "default_postgres": {
+            "enabled": true,
+            "host": "localhost",
+            "user": "postgres",
+            "password": "",
+            "database": "postgres",
+            "port": 5432,
+            "type": "postgres"
+        },
+        "default_mssql": {
+            "enabled": true,
+            "host": "127.0.0.1",
+            "odbc_driver_name": "MySQL ODBC 8.0 Unicode Driver",
+            "password": "password",
+            "port": 1433,
+            "type": "mssql",
+            "user": "sa"
+        },
+        "default_mongodb": {
+            "enabled": false,
+            "host": "127.0.0.1",
+            "password": "",
+            "port": 27001,
+            "type": "mongodb",
+            "user": ""
+        }
+    },
+    "interface": {
+        "dataskillet": {
+            "enabled": false
+        },
+        "datastore": {
+            "enabled": true
+        },
+        "lightwood": {
+            "enabled": true
+        },
+        "mindsdb_native": {
+            "enabled": true
+        }
+    },
+    "pip_path": null,
+    "python_interpreter": null,
+    "storage_dir": "/tmp/mindsdb_storage"
+}

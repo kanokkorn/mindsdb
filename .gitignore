@@ -1,54 +1,19 @@
-
-*.ipy*
-*.test.*
-.cache*
-storage/*
-mindsdb_storage/*
-config/personal_config.py
-*.jar
-data/*
-mindsdb.egg-info
-clean_data
-.pypirc
-
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Distribution / packaging
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# visual studio code
-.DStore
-.DS_Store
+*__pycache__*
+var
+etc
 .idea
-
-# virtualenv
-.venv
-venv/
-ENV/
-
-# pyenv
-.python-version
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
+mindsdb/logs
+mindsdb/logs
+logs
+tests/temp
+tests/docker/mariadb/connectData
+tests/docker/mariadb/jars
+tests/docker/clickhouse/database
+tests/docker/postgres/storage
+tests/docker/mysql/storage
+/integration_tests/flows/config/*
+my_model.zip
+model.py
+tests/integration_tests/flows/model.py
+tests/integration_tests/flows/my_model.zip
+tests/docker/mongodb/storage_*

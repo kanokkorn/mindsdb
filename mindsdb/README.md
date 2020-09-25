@@ -1,41 +1,47 @@
+This simple documentation should guide over how to bring ML capabilities to clickhouse. The idea is that you should be able to treat ML models just as if they were normal Clickhouse tables. What we have built so far allows you to create, train models, and finally query such models straight from the database.
 
 
+## How can you try it?
 
-# The code
+We are trying to make it as simple as possible, what we have now is 3 simple steps:
 
- * ```config/__init__.py```: All server configuration variables are set here or via env variables
- * ```external_libs```: Any library or code that is not originally developed by mindsDB
- * ```proxies```: Different ways we can expose MindsDB controller
- * ```libs```: All mindsDB code
-    * ```constants```: All mindsDB constants and structs
-    * ```controllers```: The server controllers; which handle transaction requests
-    * ```ml_models/<framework>```: Here are the various model templates by framework, given the dynamic graph capabilities of pytorch we ship with only pytorch models, but support for tensorflow is provided
-    * ```data_types```: These are MindsDB data types shared across modules
-    * ```helpers```: These are the mindsDB collection of functions that can be used across modules
-    * ```phases```: These are the modular phases involved in any given transaction in MindsDB
-    * ```workers```: Since we can distribute train and test over a computing cloud, we place train and test as worker code that can run independently and in entirely different memory spaces.
-    * ```data_sources```: MindsDB allows to use various forms of datasets and also to mix them.
-    * ```data_entities```: MindsDB stores training data in an object database and these are the entities that we access these through.
+1. Install mindsdb which is a python based server that deals with the ML part: `pip3 install mindsdb`
 
-        
+2. Then you simply run the server:  `python3 -m mindsdb`
 
-# How does it work?
+3. [Optional] When you run mindsdb you should see it creates a config file (e.g. `/home/your_user/mindsdb/etc/config.json`), edit the `default_clickhouse` key of this file to specify how to connect to your clickhouse instance (if it runs on localhost:8123 with the default user and no password this step is not needed)
 
-You tell mindsDB what you want to predict and from what data it should 
-learn this prediction. Such as:
+If everything worked you should be able to see a new database called `mindsdb` appear in your clickhouse server.
 
-```sql
- FROM <this> PREDICT <that>
+## Hands on ML  
+
+For the sake of this example we will use a table pulled from a url that contains information about house rentals.
+
+```
+CREATE TABLE default.home_rentals (number_of_rooms String, number_of_bathrooms String, sqft Int64, location String, days_on_market Int64, initial_price Int64, neighborhood String, rental_price Float64)  ENGINE=URL('https://raw.githubusercontent.com/mindsdb/mindsdb-examples/master/benchmarks/home_rentals/dataset/train.csv', CSVWithNames)
 ```
 
-After that; MindsDB figures out how to:
+First, we'll train a predictor that predict a home's rental price based on the other columns in the table:
 
-* Build a custom set of neural networks that can possibly best achieve the prediction you want.
-* Prepare the data so it can be fed into the proposed neural networks
-* Train, test and compare the the accuracy and complexity of each neural network.
-* Deploy the best suited model to a production environment that can  be used and updated with tools that are very familiar to any developer (see the proxy section).
+```
+INSERT INTO mindsdb.predictors (name, predict, select_data_query) VALUES('rentals_predictor','rental_price','SELECT * FROM default.home_rentals WHERE days_on_market <= 60');
+```
 
-On top of all this it provides you with a step by step explanation of what is doing to obtain such predictions and what finds to be important within your data. 
+You should see mindsdb output some training logs, we'll have to wait a few minutes unitl the predictor is fully trained.
 
-Currently MindsDB works with relational data sources. What this means, is data lives in tables in: excel spreadsheets, CSV files or tables in any of the following database servers (oracle, mysql, postgres,  mariadb, redshift, aurora, oracle, TyDB)
+Once that's done you can give some input data and get a prediction like this:
 
+```
+SELECT rental_price FROM mindsdb.rentals_predictor WHERE initial_price=900 and number_of_rooms='2';
+```
+
+Or, you can select some other data from a similar table (or the same table) and get a bunch of predictions.
+
+```
+SELECT rental_price FROM mindsdb.rentals_predictor WHERE `select_data_query`='SELECT * FROM default.home_rentals WHERE days_on_market > 60';
+```
+
+
+There's also some explainability features, confidence ranges for numerical predictions and confidence values for prediction but we are still tinkering around how to expose those in clickhouse.
+
+There's also a GUI with which you can visualize your predictors and the data it was trained on, plus a few extra insights about both. You can download it from here: https://www.mindsdb.com/product
